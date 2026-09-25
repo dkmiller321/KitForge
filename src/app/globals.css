@@ -134,3 +134,47 @@
     @apply font-sans;
   }
 }
+/* Rendered kit Markdown */
+.markdown {
+  @apply space-y-3 text-sm leading-6;
+}
+.markdown h1 {
+  @apply text-xl font-semibold tracking-tight;
+}
+.markdown h2 {
+  @apply pt-2 text-lg font-semibold;
+}
+.markdown h3 {
+  @apply pt-1 font-semibold;
+}
+.markdown ol {
+  @apply list-decimal space-y-1 pl-6;
+}
+.markdown ul {
+  @apply list-disc space-y-1 pl-6;
+}
+.markdown ul:has(> li > input[type="checkbox"]) {
+  @apply list-none pl-1;
+}
+.markdown code {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-xs;
+}
+.markdown pre {
+  @apply overflow-x-auto rounded-lg bg-muted p-3;
+}
+.markdown pre code {
+  @apply bg-transparent p-0;
+}
+.markdown a {
+  @apply text-forge underline;
+}
+.markdown table {
+  @apply w-full border-collapse text-left;
+}
+.markdown th,
+.markdown td {
+  @apply border border-border px-2 py-1;
+}
+.markdown blockquote {
+  @apply border-l-2 border-border pl-3 text-muted-foreground;
+}
