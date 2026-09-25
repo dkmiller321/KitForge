@@ -17,8 +17,8 @@ export const dynamic = "force-dynamic";
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const inboxCount = countNewFeedback();
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="antialiased">
         <header className="border-b border-border bg-card/60 backdrop-blur">
           <div className="mx-auto flex h-14 max-w-5xl items-center gap-8 px-4">
             <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
