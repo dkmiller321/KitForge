@@ -42,3 +42,6 @@ function load(): Env & { dbPath: string } {
 }
 
 export const env = load();
+
+/** Where Claude Code on this machine reaches KitForge (used in the kit's reporting step). */
+export const appUrl = `http://${env.KITFORGE_HOST}:${env.KITFORGE_PORT}`;

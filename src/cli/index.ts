@@ -33,7 +33,8 @@ program
   .command("pull")
   .description("Install a kit into ~/.claude/skills/<name>")
   .argument("<kit>", "kit name, optionally with @version")
-  .action((spec: string) => run(() => pull(spec)));
+  .option("--report", "add the final step that makes Claude report each session to KitForge")
+  .action((spec: string, opts: { report?: boolean }) => run(() => pull(spec, { report: opts.report })));
 
 program
   .command("list")

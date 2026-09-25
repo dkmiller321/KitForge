@@ -77,10 +77,11 @@ Requirements are grouped by area; P0 = v1 must have, P1 = v1 should have, P2 = l
 | --- | --- | --- |
 | L1 | `kit pull <name>[@version]` writes the kit to `~/.claude/skills/<name>/` plus a `.kitforge.json` manifest (name, version, content hash) | P0 |
 | L2 | `kit list` shows local kits, installed version and latest version | P0 |
-| L3 | `kit hook install` adds a Claude Code `SessionEnd` hook that calls `kit report` | P0 |
-| L4 | `kit report` finds which installed kits the session used, builds a run report and uploads it | P0 |
+| L3 | `kit hook install` adds a Claude Code `SessionEnd` hook that calls `kit report` | Dormant (2026-09-25: replaced by L7; code kept, not in setup) |
+| L4 | `kit report` finds which installed kits the session used, builds a run report and uploads it | Dormant (2026-09-25: replaced by L7; code kept, not in setup) |
 | L5 | `kit note "<text>" [--rating 1-5]` attaches a manual note to the most recent run | P1 |
 | L6 | `kit push <folder>` imports a locally edited kit as a new version | P2 |
+| L7 | Every kit KitForge hands out (Download for Claude zip, `kit pull --report`) ends with a "Final step: report this session" section; at the end of the session Claude POSTs outcome, corrections and test counts to `POST /api/runs/report`. No transcript, no LLM call. Works wherever the kit lives, including Claude's synced skills | P0 (added 2026-09-25) |
 
 **Runs and feedback capture (R)**
 
@@ -199,6 +200,8 @@ The CLI installs kits and reports runs; the API owns all LLM calls and storage.
 | `GET /api/kits/:name/files?version=` | name, optional semver | Returns files for pull (latest current if omitted) |
 | `POST /api/kits/:name/current` | semver | Rollback / set current |
 | `POST /api/runs` | session\_id, kit name, version, project path, times, trimmed transcript | Extracts corrections via LLM, stores run + feedback; idempotent on session\_id + kit |
+| `POST /api/runs/report` | kit, version, outcome, corrections[{text, quote}], tests, project_path, session_id? | Self-report from the kit's final step; stored as-is (quotes clipped to 299 chars); idempotent when session_id is given |
+| `GET /api/kits/:name/export?version=` | — | Zip of a version with the reporting step added (Download for Claude) |
 | `POST /api/runs/:id/notes` | text, rating | Adds manual feedback |
 | `PATCH /api/feedback/:id` | status, tags | Triage |
 | `POST /api/feedback/merge` | ids\[\] | Merges into the first id |
@@ -228,6 +231,7 @@ Six stages take KitForge from skeleton to the full run → feedback → new vers
 | 3 Run capture | L3, L4, R1–R4 | `kit report` on the fixture transcript creates one run for debug-kit 1.0.0 with outcome "partial" and 2 corrections, visible in the kit's Runs tab; a second identical report creates nothing |
 | 4 Inbox | T1, T2, L5, R5 | Both corrections appear in the Inbox; accepting one and dismissing the other leaves 0 untriaged; `kit note` adds a third item |
 | 5 Improve and publish | I1–I4, M1 | Improve on 2 accepted items returns 2 hunks with rationales; accepting both and publishing creates debug-kit 1.1.0 whose SKILL.md contains the new rule, whose changelog links both items, and both items show "Resolved in 1.1.0"; `kit pull` now installs 1.1.0 |
+| 7 Self-reporting (added 2026-09-25) | L7 | A self-report POSTed to `/api/runs/report` creates one run with its corrections; the Download for Claude zip and `kit pull --report` put the reporting step at the end of SKILL.md, and running that step as written records a run |
 | 6 Polish (P1) | K6–K8, T3, I5, I6, M2, R6 | Compare shows 1.0.0 vs 1.1.0 metrics side by side; rollback to 1.0.0 makes `kit pull` install 1.0.0; merging 2 items leaves 1 with both runs listed |
 
 ## Success metrics, risks and open questions
@@ -243,6 +247,10 @@ KitForge succeeds if kits measurably need fewer corrections after each published
 | Mean corrections per run, version N+1 vs N | Down ≥ 25% after 10 runs on N+1 |
 | Proposal hunks accepted without edits | ≥ 60% |
 | Time from Improve to published version | Under 3 minutes |
+
+**Change log**
+
+- 2026-09-25: Run capture moved from the SessionEnd hook (L3/L4) to a self-report step inside each kit (L7). Reason: kits synced by Claude live outside `~/.claude/skills/<name>/`, so hook-based detection never saw them. Trade-off accepted: sessions that end before the final step (closed early, crashed) are not recorded, and the report is Claude's own account rather than an independent extraction. The hook code stays in the repo, unused, so it can return as a backup.
 
 **Risks**
 

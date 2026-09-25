@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { feedback, kitVersions, kits, runs } from "@/db/schema";
 import { getLlm } from "@/lib/llm";
+import type { Extraction } from "@/lib/llm/schemas";
 import type { Outcome } from "@/lib/metrics";
 
 export class RunError extends Error {
@@ -46,22 +48,61 @@ function findRun(sessionId: string, kitId: number) {
     .get();
 }
 
-/**
- * Records one run: extracts corrections with the LLM, then writes the run and its feedback in one
- * transaction. Idempotent on (session, kit). The transcript is only passed to the LLM, never stored.
- */
-export async function recordRun(input: RunReportInput): Promise<{ created: boolean; runId: number }> {
+function resolveKitVersion(kitName: string, semver: string) {
   const db = getDb();
-  const kit = db.select().from(kits).where(eq(kits.name, input.kit)).get();
+  const kit = db.select().from(kits).where(eq(kits.name, kitName)).get();
   if (!kit) throw new RunError("kit_not_found", 404);
   const version = db
     .select()
     .from(kitVersions)
-    .where(and(eq(kitVersions.kitId, kit.id), eq(kitVersions.semver, input.version)))
+    .where(and(eq(kitVersions.kitId, kit.id), eq(kitVersions.semver, semver)))
     .get();
   if (!version) throw new RunError("version_not_found", 404);
+  return { kitId: kit.id, versionId: version.id };
+}
 
-  const existing = findRun(input.sessionId, kit.id);
+interface RunMeta {
+  sessionId: string;
+  projectPath: string;
+  startedAt: string;
+  endedAt: string;
+}
+
+/** Writes a run and its corrections in one transaction. Idempotent on (session, kit). */
+function storeRun(target: { kitId: number; versionId: number }, meta: RunMeta, result: Extraction): { created: boolean; runId: number } {
+  const db = getDb();
+  return db.transaction(() => {
+    const existing = findRun(meta.sessionId, target.kitId);
+    if (existing) return { created: false, runId: existing.id };
+    const run = db
+      .insert(runs)
+      .values({
+        sessionId: meta.sessionId,
+        kitId: target.kitId,
+        kitVersionId: target.versionId,
+        projectPath: meta.projectPath,
+        startedAt: meta.startedAt,
+        endedAt: meta.endedAt,
+        outcome: result.outcome,
+        testsPassed: result.tests?.passed ?? null,
+        testsFailed: result.tests?.failed ?? null,
+      })
+      .returning({ id: runs.id })
+      .get();
+    for (const c of result.corrections) {
+      db.insert(feedback).values({ runId: run.id, kitId: target.kitId, kind: "correction", text: c.text, quote: c.quote }).run();
+    }
+    return { created: true, runId: run.id };
+  });
+}
+
+/**
+ * Records one run from a transcript: extracts corrections with the LLM, then stores them.
+ * Idempotent on (session, kit). The transcript is only passed to the LLM, never stored.
+ */
+export async function recordRun(input: RunReportInput): Promise<{ created: boolean; runId: number }> {
+  const target = resolveKitVersion(input.kit, input.version);
+  const existing = findRun(input.sessionId, target.kitId);
   if (existing) return { created: false, runId: existing.id };
 
   let extraction;
@@ -70,30 +111,25 @@ export async function recordRun(input: RunReportInput): Promise<{ created: boole
   } catch {
     throw new RunError("extraction_failed", 502);
   }
+  return storeRun(target, input, extraction);
+}
 
-  return db.transaction(() => {
-    const raced = findRun(input.sessionId, kit.id);
-    if (raced) return { created: false, runId: raced.id };
-    const run = db
-      .insert(runs)
-      .values({
-        sessionId: input.sessionId,
-        kitId: kit.id,
-        kitVersionId: version.id,
-        projectPath: input.projectPath,
-        startedAt: input.startedAt,
-        endedAt: input.endedAt,
-        outcome: extraction.outcome,
-        testsPassed: extraction.tests?.passed ?? null,
-        testsFailed: extraction.tests?.failed ?? null,
-      })
-      .returning({ id: runs.id })
-      .get();
-    for (const c of extraction.corrections) {
-      db.insert(feedback).values({ runId: run.id, kitId: kit.id, kind: "correction", text: c.text, quote: c.quote }).run();
-    }
-    return { created: true, runId: run.id };
-  });
+export interface SelfReportInput extends Extraction {
+  sessionId?: string;
+  kit: string;
+  version: string;
+  projectPath: string;
+}
+
+/** A run reported by Claude itself from the kit's final step: no transcript, no LLM call. */
+export function recordSelfReport(input: SelfReportInput): { created: boolean; runId: number } {
+  const target = resolveKitVersion(input.kit, input.version);
+  const now = new Date().toISOString();
+  return storeRun(
+    target,
+    { sessionId: input.sessionId ?? `self-${randomUUID()}`, projectPath: input.projectPath, startedAt: now, endedAt: now },
+    { outcome: input.outcome, corrections: input.corrections, tests: input.tests },
+  );
 }
 
 export function listRuns(kitName?: string): RunDto[] {

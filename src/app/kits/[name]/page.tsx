@@ -53,6 +53,14 @@ export default async function KitPage({
           <span data-testid="improve-count" className="text-sm text-muted-foreground">
             {accepted} accepted
           </span>
+          <a
+            data-testid="export-button"
+            href={`/api/kits/${kit.name}/export?version=${kit.currentVersion}`}
+            title="Zip of this version with the reporting step added, to upload to Claude as a skill"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          >
+            Download for Claude
+          </a>
           <EditKit key={kit.currentVersion} kit={kit.name} version={kit.currentVersion} files={filesForVersion(kit.currentVersionId)} />
           <ImproveButton kit={kit.name} accepted={accepted} />
         </div>

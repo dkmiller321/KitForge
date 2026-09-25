@@ -6,7 +6,7 @@ import { listFeedback, mergeFeedback, triageFeedback } from "./feedback/service"
 import { kitFromEntries, readFolder } from "./kits/parse";
 import { KitError, createManualVersion, getKit, getVersionFiles, importKit, kitMetrics, setCurrentVersion } from "./kits/service";
 import { ProposalError, createProposal, decideHunk, getProposal, listProposals, publishProposal } from "./proposals/service";
-import { RunError, addNote, listRuns, recordRun } from "./runs/service";
+import { RunError, addNote, listRuns, recordRun, recordSelfReport } from "./runs/service";
 
 const DEBUG_KIT = path.resolve("e2e/fixtures/debug-kit");
 const report = (sessionId: string, marker: string, version = "1.0.0") =>
@@ -123,5 +123,37 @@ describe("imports", () => {
   it("stores files exactly as given", () => {
     const files = getVersionFiles("debug-kit", "1.0.0").files;
     expect(files.find((f) => f.path === "SKILL.md")?.content).toBe(fs.readFileSync(path.join(DEBUG_KIT, "SKILL.md"), "utf8"));
+  });
+});
+
+describe("self-reports", () => {
+  const selfReport = (sessionId?: string) =>
+    recordSelfReport({
+      sessionId,
+      kit: "debug-kit",
+      version: "1.0.0",
+      projectPath: "/tmp/p",
+      outcome: "partial",
+      corrections: [{ text: "Skipped the failing test", quote: "Test first, please." }],
+      tests: { passed: 5, failed: 1 },
+    });
+
+  it("stores the run and its corrections without calling the LLM", () => {
+    expect(selfReport("claude-1")).toEqual({ created: true, runId: 1 });
+    expect(listRuns("debug-kit")[0]).toMatchObject({ sessionId: "claude-1", outcome: "partial", correctionCount: 1, testsPassed: 5 });
+    expect(listFeedback()[0]).toMatchObject({ kind: "correction", text: "Skipped the failing test", status: "new" });
+  });
+
+  it("is idempotent when a session id is given, and generates one otherwise", () => {
+    selfReport("claude-1");
+    expect(selfReport("claude-1")).toEqual({ created: false, runId: 1 });
+    expect(selfReport().created).toBe(true);
+    expect(selfReport().created).toBe(true);
+    expect(listRuns()).toHaveLength(3);
+  });
+
+  it("rejects unknown kits and versions", () => {
+    expect(() => recordSelfReport({ kit: "nope", version: "1.0.0", projectPath: "", outcome: "success", corrections: [], tests: null })).toThrow(RunError);
+    expect(() => recordSelfReport({ kit: "debug-kit", version: "9.9.9", projectPath: "", outcome: "success", corrections: [], tests: null })).toThrow(RunError);
   });
 });

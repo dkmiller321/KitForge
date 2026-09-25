@@ -203,6 +203,7 @@ Mock calls wait 300 ms before resolving so loading states are observable (`propo
 | `publish-error` | Error text |
 | `regenerate-instruction` / `regenerate-button` | Regenerate controls |
 | `edit-kit-button` / `edit-file-select` / `edit-textarea` / `edit-changelog` / `edit-save` | In-browser editing (K8) |
+| `export-button` | "Download for Claude": zip of the current version with the reporting step (L7) |
 
 ## 2. Scenarios
 
@@ -298,6 +299,14 @@ Each scenario starts from a reset DB and a fresh `tmpHome()`. Shorthand:
 **E2E-29 @stage6 compare versions (M2).** After E2E-19 in full, click `compare-link`: `compare-a` shows `1.0.0` with `0%` and `2.0`; `compare-b` shows `1.1.0` with `100%` and `0.0`.
 
 **E2E-30 @stage6 test counts (R6).** After E2E-10's setup, `run-tests` = `3 passed, 1 failed`. Report `transcript-feature.jsonl` for new-feature-kit (import and pull it first): that run's `run-tests` = `—`.
+
+### Stage 7 — Self-reporting (added 2026-09-25)
+
+The SessionEnd hook is dormant; runs are reported by the kit's own final step (PRD L7). E2E-09 … E2E-13 still pass and still cover the dormant `kit report` / `kit hook install` code.
+
+**E2E-31 @stage7 self-report from the kit's final step (L7, R1, R2).** Import debug-kit. `POST /api/runs/report` with `{ session_id: "claude-001", kit: "debug-kit", version: "1.0.0", project_path: "/tmp/proj-b", outcome: "partial", corrections: [2 items, the second quote over 400 chars], tests: { passed: 5, failed: 1 } }` → 201 with `message` `Reported to KitForge: run #<id>, 2 correction(s)`. The same body again → 200, `created: false`, same run id. Unknown kit → 404, unknown version → 404, outcome `great` → 400. `GET /api/runs?kit=debug-kit` has exactly that one run (partial, 2 corrections, `/tmp/proj-b`); `GET /api/feedback?status=new` has both texts and every quote is under 300 chars. The Runs tab shows `partial`, `2`, `5 passed, 1 failed`; the inbox shows 2 items.
+
+**E2E-32 @stage7 kits carry the reporting step, and it works as written (L1, L7).** Import debug-kit. Click `export-button`: the download is `debug-kit-1.0.0.zip` with exactly `debug-kit/SKILL.md` and `debug-kit/references/checklist.md`; SKILL.md starts with the fixture content and contains `## Final step: report this session to KitForge` and `"version": "1.0.0"`; the checklist equals the fixture; the kit still has one version. `runKit(['pull','debug-kit','--report'])` installs a SKILL.md identical to the exported one, and `.kitforge.json` `hash` equals the stored `contentHash`. Taking the URL and JSON template from the installed step, filling the placeholders and POSTing it creates a run (version 1.0.0, success, 1 correction). A plain `pull` afterwards installs SKILL.md byte-identical to the fixture again.
 
 ### Smoke — real Claude API (manual only)
 

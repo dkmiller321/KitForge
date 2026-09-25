@@ -6,6 +6,7 @@ import { mergeHookSettings } from "../cli/hook";
 import { contentHash } from "./kits/hash";
 import { applyHunks, editsToHunks, HunkConflictError } from "./kits/hunks";
 import { KitImportError, kitFromEntries } from "./kits/parse";
+import { REPORT_END, REPORT_START, withReportingStep } from "./kits/reporting";
 import { bumpSemver, compareSemver, nextVersion } from "./kits/semver";
 import { mockExtraction, mockProposal } from "./llm/mock";
 import { extractionSchema, proposalSchema } from "./llm/schemas";
@@ -222,5 +223,29 @@ describe("kitFromEntries", () => {
   it("rejects a folder without SKILL.md", () => {
     expect(() => kitFromEntries([{ path: "README.md", content: "# Not a kit" }], "x")).toThrow(KitImportError);
     expect(() => kitFromEntries([{ path: "README.md", content: "# Not a kit" }], "x")).toThrow("No SKILL.md found");
+  });
+});
+
+describe("withReportingStep", () => {
+  const target = { name: "debug-kit", version: "1.2.0", baseUrl: "http://127.0.0.1:4317" };
+
+  it("appends one reporting section to SKILL.md only", () => {
+    const out = withReportingStep(FILES, target);
+    const skill = out.find((f) => f.path === "SKILL.md")!.content;
+    expect(skill.startsWith(SKILL.trimEnd())).toBe(true);
+    expect(skill).toContain('"kit": "debug-kit"');
+    expect(skill).toContain('"version": "1.2.0"');
+    expect(skill).toContain("curl -s -X POST http://127.0.0.1:4317/api/runs/report");
+    expect(out.find((f) => f.path === "references/checklist.md")!.content).toBe(CHECKLIST);
+  });
+
+  it("replaces an earlier section instead of stacking a second one", () => {
+    const once = withReportingStep(FILES, { ...target, version: "1.0.0" });
+    const twice = withReportingStep(once, target);
+    const skill = twice.find((f) => f.path === "SKILL.md")!.content;
+    expect(skill.split(REPORT_START)).toHaveLength(2);
+    expect(skill.split(REPORT_END)).toHaveLength(2);
+    expect(skill).not.toContain('"version": "1.0.0"');
+    expect(skill).toBe(withReportingStep(FILES, target).find((f) => f.path === "SKILL.md")!.content);
   });
 });

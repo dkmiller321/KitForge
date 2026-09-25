@@ -10,12 +10,15 @@ interface FilesResponse {
   files: { path: string; content: string }[];
 }
 
-export async function pull(spec: string): Promise<string> {
+export async function pull(spec: string, opts: { report?: boolean } = {}): Promise<string> {
   const at = spec.lastIndexOf("@");
   const name = at > 0 ? spec.slice(0, at) : spec;
   const version = at > 0 ? spec.slice(at + 1) : undefined;
 
-  const query = version ? `?version=${encodeURIComponent(version)}` : "";
+  const params = new URLSearchParams();
+  if (version) params.set("version", version);
+  if (opts.report) params.set("report", "1");
+  const query = params.size ? `?${params}` : "";
   const res = await request(`/api/kits/${encodeURIComponent(name)}/files${query}`);
   if (!res.ok) {
     const code = await errorCode(res);
