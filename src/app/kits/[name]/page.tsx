@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { Changelog } from "@/components/changelog";
 import { FilesTab } from "@/components/files-tab";
 import { MarkdownView } from "@/components/markdown-view";
+import { RunsTab } from "@/components/runs-tab";
 import { SetCurrentButton } from "@/components/set-current-button";
 import { acceptedCount, filesForVersion, getKit } from "@/lib/kits/service";
+import { listRuns } from "@/lib/runs/service";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +70,7 @@ export default async function KitPage({
       </nav>
 
       {tab === "files" && <FilesSection kitName={kit.name} versions={kit.versions} requested={query.version} />}
+      {tab === "runs" && <RunsTab runs={listRuns(kit.name)} />}
       {tab === "versions" && (
         <ol className="space-y-3">
           {kit.versions.map((v) => (

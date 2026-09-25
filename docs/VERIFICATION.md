@@ -53,3 +53,20 @@ MCP / shell walkthrough (CLI run from Git Bash with `HOME` and `USERPROFILE` set
 - E2E-08: pass. An empty home prints "No kits installed" (exit 0); after the pull it prints `debug-kit 1.0.0 (latest 1.0.0)`.
 
 Stage 2 needed no UI; the `pull-command` text on the kit page was checked in E2E-04.
+
+## Stage 3 — Run capture (2026-09-25)
+
+Commands:
+
+- `npm run typecheck`: clean. `npx eslint src`: clean. `npm test`: 23 passed.
+- `npx playwright test --grep "@stage[0-3]"`: 14 passed, 0 failed.
+
+Walkthrough (CLI in Git Bash with a fresh temp `HOME`/`USERPROFILE`; UI through `playwright-headless`; server in mock mode on `.data/mcp.db`, reset first):
+
+- E2E-09: pass. Starting from `{"theme":"dark"}`, `kit hook install` twice printed `SessionEnd hook installed in <home>\.claude\settings.json` (exit 0) both times. The file keeps `theme: dark` and has exactly one `SessionEnd` entry with one `{type: command, command: "kit report"}`.
+- E2E-10: pass. `report partial` (sess-001, hook JSON on stdin) printed `Reported 1 run(s)`. `/api/runs?kit=debug-kit` returns one run with sessionId sess-001, projectPath /tmp/proj-a, outcome partial, correctionCount 2, tests 3/1, and no transcript field. `/api/feedback?status=new` returns the two X1 corrections with exact texts and quotes. MCP: the Runs tab shows run-row(s) with `partial`, `2`, `1.0.0`, `3 passed, 1 failed`; the library card shows 0% success.
+- E2E-11: pass. Repeating sess-001 printed `Reported 0 run(s)`; the no-kit transcript printed `No kits used`; there is still 1 run.
+- E2E-12: pass. With `KITFORGE_URL=http://127.0.0.1:59999`, the report printed `Queued 1 report(s)` in about 500 ms and the outbox held one `.json`. The next report (no-kit, normal URL) printed `Flushed 1 queued report(s)` / `No kits used`, the outbox is empty and the queued run exists. This walk used session sess-005 for the queued report because sess-001 already existed on the shared walkthrough DB; the spec uses a fresh DB.
+- E2E-13: pass. The `MOCK:extract-fail` transcript as sess-010 printed `Queued 1 report(s)`; no sess-010 run or feedback was written (the server returned 502 `extraction_failed`), and the report waits in the outbox.
+
+Surprises: none in the app. My first walkthrough helper mangled Windows paths in the stdin JSON (a shell quoting bug); rerunning with `cygpath -m` fixed it.
