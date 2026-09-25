@@ -116,3 +116,25 @@ MCP walkthrough (`playwright-headless` + CLI with a temp HOME, mock server on `.
 - E2E-22: pass. `MOCK:proposal-fail` shows `proposal-loading`, then "Couldn't generate a proposal. Nothing was changed."; URL stays `/kits/debug-kit`; no drafts; current 1.0.0; #1 and #2 still accepted.
 
 Bug found and fixed: the inbox removed an item before its PATCH had committed (optimistic UI), so an immediate navigation could render a stale state (the Improve button disabled with 0 accepted). Accept, dismiss and merge now remove items only after the server confirms the change.
+
+## Stage 6 — Polish (P1) (2026-09-25)
+
+Commands:
+
+- `npm run typecheck`: clean. `npx eslint src e2e`: clean.
+- `npm test`: 34 passed (added `src/lib/services.test.ts`: run idempotency, atomic extraction failure, merge runIds, publish and immutability, stale proposal, undecided/nothing-accepted refusal, one draft per kit, bump after rollback, duplicate import).
+- `npx playwright test --grep "@stage6" --retries=0`: 8 passed on the first run.
+- `npx playwright test` (all non-smoke): 31 passed, 0 failed (run twice, before and after the a11y labels below).
+
+MCP walkthrough (`playwright-headless` + CLI with a temp HOME, mock server on `.data/mcp.db`):
+
+- E2E-25: pass. Versions → diff 1.0.0 → 1.1.0 → Show diff: react-diff-view renders `SKILL.md (modified)` with the removed "1. Reproduce … before changing code." and `references/checklist.md (modified)` with the added "- [ ] Only the failing test run while iterating".
+- E2E-29: pass. Metrics → compare-link → `/compare?a=1.0.0&b=1.1.0`: compare-a is 1.0.0 with 1 run / 0% / 2.0; compare-b is 1.1.0 with 1 run / 100% / 0.0 ("Success rate +100 points. Corrections per run -2.0.").
+- E2E-26: pass. Set current on 1.0.0 → `kit-current-version` 1.0.0 and `kit pull debug-kit@1.0.0`. The CLI pull installs 1.0.0 (no "Never write the fix first."), `kit list` shows `1.0.0 (latest 1.0.0)`, and the API still lists 1.1.0.
+- E2E-24: pass. Regenerate with "shorter" on proposal #1 → new URL `/proposals/2`, one hunk `+3. Fix the root cause.`, #1 `discarded`.
+- E2E-27: pass. Proposal #3 made against 1.0.0; Edit → SKILL.md → appended "4. Commit the test with the fix." → changelog "Manual tweak" → current 1.0.1, changelog `- Manual tweak`. Publishing #3 shows "This proposal was made for 1.0.0, but the current version is 1.0.1. Regenerate it."; versions are only 1.0.1 and 1.0.0.
+- E2E-23: pass. Regenerated against 1.0.1; edited the SKILL.md hunk to "1. Always write a failing test first." (the diff re-rendered with the new `+` line); accepted both; published 1.1.0. Its SKILL.md contains the edited rule, not "Never write the fix first.", and keeps the manual rule 4.
+- E2E-28: pass. With sess-001 and the dup transcript (sess-003) reported, selecting #1 and #3 and merging leaves #1 with `2 runs`; #3 is `merged`, `mergedIntoId: 1`.
+- E2E-30: pass. debug-kit runs show `3 passed, 1 failed` (and `2 passed, 1 failed` for the dup run); the new-feature-kit run shows `—`.
+
+Fixes from the walkthrough: the compare-page selects, diff selects and edit dialog controls had no accessible names in the accessibility snapshot; `aria-label`s were added.

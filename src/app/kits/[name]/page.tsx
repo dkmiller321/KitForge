@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Changelog } from "@/components/changelog";
+import { EditKit } from "@/components/edit-kit";
 import { FilesTab } from "@/components/files-tab";
 import { ImproveButton } from "@/components/improve-button";
 import { MarkdownView } from "@/components/markdown-view";
 import { MetricsTab } from "@/components/metrics-tab";
 import { RunsTab } from "@/components/runs-tab";
 import { SetCurrentButton } from "@/components/set-current-button";
+import { VersionDiff } from "@/components/version-diff";
 import { acceptedCount, filesForVersion, getKit, kitMetrics } from "@/lib/kits/service";
 import { listRuns } from "@/lib/runs/service";
 import { cn } from "@/lib/utils";
@@ -51,6 +53,7 @@ export default async function KitPage({
           <span data-testid="improve-count" className="text-sm text-muted-foreground">
             {accepted} accepted
           </span>
+          <EditKit key={kit.currentVersion} kit={kit.name} version={kit.currentVersion} files={filesForVersion(kit.currentVersionId)} />
           <ImproveButton kit={kit.name} accepted={accepted} />
         </div>
       </div>
@@ -75,6 +78,7 @@ export default async function KitPage({
       {tab === "files" && <FilesSection kitName={kit.name} versions={kit.versions} requested={query.version} />}
       {tab === "runs" && <RunsTab runs={listRuns(kit.name)} />}
       {tab === "metrics" && <MetricsTab kit={kit.name} metrics={kitMetrics(kit.name)} />}
+      {tab === "versions" && kit.versions.length > 1 && <VersionDiff kit={kit.name} versions={kit.versions.map((v) => v.semver)} />}
       {tab === "versions" && (
         <ol className="space-y-3">
           {kit.versions.map((v) => (

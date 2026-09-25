@@ -13,6 +13,8 @@ export function ImportDialog() {
   const [folder, setFolder] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [blankName, setBlankName] = useState("");
+  const [blankError, setBlankError] = useState<string | null>(null);
 
   function reset(next: boolean) {
     setOpen(next);
@@ -20,7 +22,25 @@ export function ImportDialog() {
       setFile(null);
       setFolder("");
       setError(null);
+      setBlankName("");
+      setBlankError(null);
     }
+  }
+
+  async function createBlank() {
+    setBlankError(null);
+    const res = await fetch("/api/kits", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: blankName.trim() }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { name?: string; message?: string };
+    if (!res.ok) {
+      setBlankError(body.message ?? "Couldn't create the kit.");
+      return;
+    }
+    reset(false);
+    router.push(`/kits/${body.name}`);
   }
 
   async function submit(e: React.FormEvent) {
@@ -82,6 +102,21 @@ export function ImportDialog() {
             </Button>
           </div>
         </form>
+        <div className="space-y-1.5 border-t border-border pt-4 text-sm">
+          <span className="font-medium">…or start a blank kit</span>
+          <div className="flex gap-2">
+            <Input
+              data-testid="new-kit-name"
+              placeholder="review-kit"
+              value={blankName}
+              onChange={(e) => setBlankName(e.target.value)}
+            />
+            <Button data-testid="new-kit-submit" variant="outline" disabled={!blankName.trim()} onClick={createBlank}>
+              Create
+            </Button>
+          </div>
+          {blankError && <p className="text-sm text-destructive">{blankError}</p>}
+        </div>
       </DialogContent>
     </Dialog>
   );
