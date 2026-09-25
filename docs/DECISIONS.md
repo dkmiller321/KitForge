@@ -1,0 +1,29 @@
+# DECISIONS.md
+
+Claude Code records here every assumption it had to make, every gap or contradiction found in the PRD or E2E_TESTS.md and how it was resolved, anything declared out of scope instead of stubbed, and any difference found between the fixture transcript format and real Claude Code transcripts. One dated entry per decision, with the reason.
+
+## 2026-09-25 — Build kickoff
+
+None of these blocked the build; each is a gap or a platform detail the docs leave open.
+
+1. **Windows home directory in the CLI harness.** On Windows `os.homedir()` reads `USERPROFILE`, not `HOME`. `e2e/helpers/cli.ts` sets both `HOME` and `USERPROFILE` to the temp home. The CLI itself still derives every path from `os.homedir()`, as required.
+2. **How `runKit` spawns the CLI.** E2E_TESTS §1.3 says it spawns `npx tsx src/cli/index.ts`. The helper starts `node node_modules/tsx/dist/cli.mjs src/cli/index.ts` instead. It is the same program without the `npx` shim, which on Windows needs a shell and adds about 1 s per call; that overhead matters for E2E-12's `ms < 12000`.
+3. **Path separators.** `detectKits` normalises `\` to `/` before matching `/.claude/skills/<name>/SKILL.md`, because Claude Code on Windows records `C:\Users\…\.claude\skills\…` paths. CLI stdout paths (`Installed … to <dir>`, `SessionEnd hook installed in <file>`) use the platform separator, and the specs build their expectations with `path.join`.
+4. **Line endings.** `.gitattributes` forces LF for fixtures so "byte-identical to the fixture" (E2E-06, E2E-19 step 6) holds on Windows checkouts.
+5. **Forced tool use for the real LLM.** CLAUDE.md asks for forced tool use. Current Claude models (Opus 5.5, Fable 5.1) reject `tool_choice: {type: "tool"}` with a 400. `src/lib/llm/anthropic.ts` offers exactly one tool with `tool_choice: {type: "auto", disable_parallel_tool_use: true}`, and the system prompt requires calling it. The tool's `input_schema` is generated from the same zod schema, and the output goes through the same zod validation as the mock. A response without the tool call is an error: `extraction_failed` (the report is queued) or `proposal_failed`.
+6. **`kit report` output when nothing was sent.** "Reported N run(s)" is printed only when at least one report got an answer from the server (N counts newly created runs, so a duplicate prints `Reported 0 run(s)`). "Queued M report(s)" is printed when M > 0. This matches E2E-11/12/13 exactly and the CLAUDE.md rule to print both lines when both happen.
+7. **Which failures are queued.** Network errors, timeouts and 5xx responses (including `502 extraction_failed`, E2E-13) are queued in `~/.kitforge/outbox/`. A 4xx (unknown kit or version, invalid payload) can never succeed on retry, so it is reported on stderr and not queued; the exit code is still 0. Queued reports are flushed at the start of the next `kit report`.
+8. **Runs table.** `runs` has a `kit_id` column in addition to the PRD's columns, so "(session_id, kit) unique together" can be a real unique index.
+9. **Merge target (T3).** `POST /api/feedback/merge` merges into the first id of `ids[]` (PRD). The inbox sends the selected ids in ascending id order, so the oldest item survives (E2E-28 expects F1). The inbox itself lists items newest first.
+10. **Version bump base.** Publish and manual edits bump from the highest existing version of the kit, not from the current one, so a publish after a rollback never collides with an existing version.
+11. **Manual edits (K8)** create a patch bump on top of the current version (E2E-27: 1.0.0 → 1.0.1). The changelog text becomes `- <line>` entries.
+12. **"Resolved" feedback (I4)** is only the feedback linked to hunks that were accepted and published. Accepted feedback whose hunks were all rejected stays `accepted` (E2E-20: F2).
+13. **One active draft per kit.** Creating a proposal (including Regenerate) marks the kit's existing draft `discarded`.
+14. **Proposal hunk rendering.** Hunks are rendered by the server from find/replace with jsdiff; `hunk-removed`/`hunk-added` each wrap that hunk's removed or added lines. `react-diff-view` has no per-line attribute hook, so it is used for the version-to-version diff (K6), not for proposal hunks.
+15. **shadcn/ui dependencies.** `shadcn init` added its own runtime packages (`radix-ui`, `class-variance-authority`, `cn`, `lucide-react`, `tw-animate-css`, `shadcn` for its CSS). These are treated as part of the approved "shadcn/ui" line.
+16. **Kit name.** It comes from `name:` in the SKILL.md frontmatter, falling back to the folder or zip name, slugified. Names must match `^[a-z0-9][a-z0-9-]*$` (they are CLI handles and directory names). The title is the first `# ` heading.
+17. **Frontmatter display.** SKILL.md YAML frontmatter is shown as a small metadata block above the rendered Markdown. Rendering it as Markdown would turn `description: …\n---` into a heading.
+18. **E2E-29 setup.** "After E2E-19 in full" is implemented as steps 1–2 plus the pull and the `sess-002` success report, which are the steps that produce the metrics E2E-29 checks.
+19. **Transcript fixtures.** The six `transcript-*.jsonl` files are generated by `scripts/gen-transcripts.ts` from the builders in `e2e/helpers/transcript.ts`, and a unit test checks that they stay identical.
+20. **Out of scope (P2, not stubbed):** L6 `kit push`, T4 suggested duplicates, M3 recurrence check. `kit note --kit <name>` exists as the PRD's fallback for missed detection.
+21. **Smoke server.** The smoke suite starts its own real-mode dev server on port 4318 with a temporary DB. SMOKE-4 first imports each kit the real transcript read from the user's `~/.claude/skills/<name>` into that server and pulls it into a temp home, so detection runs the same way as after `kit pull`.

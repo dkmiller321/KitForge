@@ -1,0 +1,6 @@
+{"type":"user","timestamp":"2026-09-20T10:00:00.000Z","message":{"role":"user","content":"MOCK:debug-partial The login test is failing, use the debug kit."}}
+{"type":"assistant","timestamp":"2026-09-20T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/Users/someone/.claude/skills/debug-kit/SKILL.md"}}]}}
+{"type":"user","timestamp":"2026-09-20T10:00:06.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"# Debug Kit ..."}]}}
+{"type":"assistant","timestamp":"2026-09-20T10:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"I'll patch the session check."}]}}
+{"type":"user","timestamp":"2026-09-20T10:01:30.000Z","message":{"role":"user","content":"Stop — write the failing test first, then fix it."}}
+{"type":"assistant","timestamp":"2026-09-20T10:20:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done. 3 passed, 1 failed."}]}}
