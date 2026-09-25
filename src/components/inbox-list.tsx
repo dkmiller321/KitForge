@@ -4,10 +4,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { FeedbackDto } from "@/lib/feedback/service";
+import { FEEDBACK_CHANGED } from "./inbox-badge";
 import { cn } from "@/lib/utils";
 
 interface Props {
-  tab: "new" | "accepted" | "resolved";
+  tab: "new" | "resolved" | "dismissed";
   kit: string;
   kitNames: string[];
   items: FeedbackDto[];
@@ -34,11 +35,12 @@ export function InboxList({ tab, kit, kitNames, items }: Props) {
   const focusIndex = visible.length === 0 ? -1 : Math.min(focus, visible.length - 1);
 
   const setStatus = useCallback(
-    async (id: number, status: "accepted" | "dismissed" | "new") => {
+    async (id: number, status: "dismissed" | "new") => {
       // Remove the item only once the change is saved, so what the list shows is always persisted.
       if (!(await patch(id, { status }))) return;
       setHidden((h) => new Set(h).add(id));
       setSelected((s) => s.filter((x) => x !== id));
+      window.dispatchEvent(new Event(FEEDBACK_CHANGED));
       router.refresh();
     },
     [router],
@@ -51,9 +53,8 @@ export function InboxList({ tab, kit, kitNames, items }: Props) {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) return;
       if (e.key === "j") setFocus(Math.min(focusIndex + 1, visible.length - 1));
       else if (e.key === "k") setFocus(Math.max(focusIndex - 1, 0));
-      else if ((e.key === "a" || e.key === "d") && tab === "new" && focusIndex >= 0) {
-        void setStatus(visible[focusIndex].id, e.key === "a" ? "accepted" : "dismissed");
-      } else return;
+      else if (e.key === "d" && tab === "new" && focusIndex >= 0) void setStatus(visible[focusIndex].id, "dismissed");
+      else return;
       e.preventDefault();
     }
     window.addEventListener("keydown", onKey);
@@ -66,6 +67,7 @@ export function InboxList({ tab, kit, kitNames, items }: Props) {
     if (!res.ok) return;
     setHidden((h) => new Set([...h, ...ids.slice(1)]));
     setSelected([]);
+    window.dispatchEvent(new Event(FEEDBACK_CHANGED));
     router.refresh();
   }
 
@@ -97,7 +99,7 @@ export function InboxList({ tab, kit, kitNames, items }: Props) {
 
       {visible.length === 0 ? (
         <p data-testid="inbox-empty" className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-          {tab === "new" ? "Nothing to triage" : tab === "accepted" ? "Nothing accepted yet" : "Nothing resolved yet"}
+          {tab === "new" ? "No open feedback" : tab === "resolved" ? "Nothing resolved yet" : "Nothing dismissed"}
         </p>
       ) : (
         <ul className="space-y-2">
@@ -137,7 +139,7 @@ function InboxItem({
   focused: boolean;
   selected: boolean;
   onSelect: (on: boolean) => void;
-  onStatus: (status: "accepted" | "dismissed" | "new") => void;
+  onStatus: (status: "dismissed" | "new") => void;
   onTags: (tags: string[]) => Promise<boolean>;
 }) {
   const [tagDraft, setTagDraft] = useState("");
@@ -200,7 +202,7 @@ function InboxItem({
                 {t}
               </span>
             ))}
-            {tab !== "resolved" && (
+            {tab === "new" && (
               <input
                 data-testid="feedback-tag-input"
                 aria-label="Add tag"
@@ -226,18 +228,13 @@ function InboxItem({
         </div>
         <div className="flex shrink-0 flex-col gap-1.5">
           {tab === "new" && (
-            <>
-              <Button data-testid="feedback-accept" size="sm" onClick={() => onStatus("accepted")}>
-                Accept
-              </Button>
-              <Button data-testid="feedback-dismiss" size="sm" variant="ghost" onClick={() => onStatus("dismissed")}>
-                Dismiss
-              </Button>
-            </>
+            <Button data-testid="feedback-dismiss" size="sm" variant="ghost" title="Leave this out of future analyses" onClick={() => onStatus("dismissed")}>
+              Dismiss
+            </Button>
           )}
-          {tab === "accepted" && (
-            <Button size="sm" variant="ghost" onClick={() => onStatus("new")}>
-              Back to new
+          {tab === "dismissed" && (
+            <Button data-testid="feedback-restore" size="sm" variant="ghost" onClick={() => onStatus("new")}>
+              Restore
             </Button>
           )}
         </div>

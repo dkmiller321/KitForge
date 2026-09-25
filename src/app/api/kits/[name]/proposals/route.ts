@@ -6,17 +6,14 @@ import { ProposalError, createProposal } from "@/lib/proposals/service";
 
 export const dynamic = "force-dynamic";
 
-const body = z.object({
-  feedback_ids: z.array(z.number().int().positive()).optional(),
-  instruction: z.string().max(2000).optional(),
-});
+const body = z.object({ instruction: z.string().max(2000).optional() });
 
-/** I1 / I6: generate (or regenerate) a proposal from accepted feedback. */
+/** I1 / I6: generate (or regenerate) a proposal from the kit's latest insights. */
 export async function POST(req: Request, { params }: { params: Promise<{ name: string }> }) {
   const input = await parseBody(req, body);
   if (input instanceof NextResponse) return input;
   try {
-    const proposal = await createProposal((await params).name, { feedbackIds: input.feedback_ids, instruction: input.instruction });
+    const proposal = await createProposal((await params).name, { instruction: input.instruction });
     return ok(proposal, 201);
   } catch (err) {
     if (err instanceof ProposalError || err instanceof KitError) return fail(err.code, err.status);

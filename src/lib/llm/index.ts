@@ -1,7 +1,7 @@
 import { env } from "@/lib/env";
-import { createAnthropicLlm } from "./anthropic";
+import { createOpenRouterLlm } from "./openrouter";
 import { mockLlm } from "./mock";
-import { extractionSchema, proposalSchema, type KitLlm, type RawKitLlm } from "./schemas";
+import { extractionSchema, insightsSchema, proposalSchema, type KitLlm, type RawKitLlm } from "./schemas";
 
 export type { KitLlm } from "./schemas";
 
@@ -9,6 +9,7 @@ export type { KitLlm } from "./schemas";
 export function validated(raw: RawKitLlm): KitLlm {
   return {
     extractRun: async (transcript) => extractionSchema.parse(await raw.extractRun(transcript)),
+    analyzeFeedback: async (input) => insightsSchema.parse(await raw.analyzeFeedback(input)),
     proposeImprovement: async (input) => proposalSchema.parse(await raw.proposeImprovement(input)),
   };
 }
@@ -16,6 +17,6 @@ export function validated(raw: RawKitLlm): KitLlm {
 let instance: KitLlm | undefined;
 
 export function getLlm(): KitLlm {
-  instance ??= validated(env.KITFORGE_LLM_MODE === "mock" ? mockLlm : createAnthropicLlm());
+  instance ??= validated(env.KITFORGE_LLM_MODE === "mock" ? mockLlm : createOpenRouterLlm());
   return instance;
 }

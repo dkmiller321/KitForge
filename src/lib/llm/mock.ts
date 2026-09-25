@@ -1,4 +1,4 @@
-import type { Extraction, ProposeInput, Proposal, RawKitLlm } from "./schemas";
+import type { AnalyzeInput, Extraction, Insights, ProposeInput, Proposal, RawKitLlm } from "./schemas";
 
 const DELAY_MS = 300;
 const wait = () => new Promise((resolve) => setTimeout(resolve, DELAY_MS));
@@ -36,8 +36,31 @@ export function mockExtraction(transcript: string): Extraction {
   return (marker && EXTRACTIONS[marker]) || DEFAULT_EXTRACTION;
 }
 
-export function mockProposal({ feedback, instruction }: ProposeInput): Proposal {
-  const ids = feedback.map((f) => f.id).sort((a, b) => a - b);
+/**
+ * Deterministic analysis: open (unresolved, undismissed) items whose text starts with the same three words
+ * become one theme; themes come in order of their first item's id; the first is high priority.
+ * Any feedback containing MOCK:analyze-fail makes the call throw.
+ */
+export function mockInsights({ feedback }: AnalyzeInput): Insights {
+  if (feedback.some((f) => f.text.includes("MOCK:analyze-fail"))) throw new Error("mock analysis failure");
+  const groups = new Map<string, typeof feedback>();
+  for (const f of [...feedback].filter((f) => f.status === "new").sort((a, b) => a.id - b.id)) {
+    const key = f.text.toLowerCase().split(/\s+/).slice(0, 3).join(" ");
+    groups.set(key, [...(groups.get(key) ?? []), f]);
+  }
+  return {
+    themes: [...groups.values()].map((items, i) => ({
+      title: items[0].text.slice(0, 160),
+      problem: items[0].quote ?? items[0].text,
+      suggestion: `Add a rule to the kit that prevents: ${items[0].text}`,
+      priority: i === 0 ? "high" : "medium",
+      feedback_ids: items.map((f) => f.id),
+    })),
+  };
+}
+
+export function mockProposal({ themes, instruction }: ProposeInput): Proposal {
+  const ids = [...new Set(themes.flatMap((t) => t.feedback_ids))].sort((a, b) => a - b);
   const f0 = ids[0];
   const f1 = ids[1] ?? ids[0];
   const lowered = (instruction ?? "").toLowerCase();
@@ -90,6 +113,10 @@ export const mockLlm: RawKitLlm = {
   async extractRun(transcript) {
     await wait();
     return mockExtraction(transcript);
+  },
+  async analyzeFeedback(input) {
+    await wait();
+    return mockInsights(input);
   },
   async proposeImprovement(input) {
     await wait();

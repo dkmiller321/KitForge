@@ -69,10 +69,29 @@ export const feedback = sqliteTable("feedback", {
   createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
 });
 
+export interface StoredTheme {
+  title: string;
+  problem: string;
+  suggestion: string;
+  priority: "high" | "medium" | "low";
+  feedback_ids: number[];
+}
+
+/** One analysis of all of a kit's feedback. The newest row per kit is the current set of insights. */
+export const insights = sqliteTable("insights", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  kitId: integer("kit_id").notNull().references(() => kits.id),
+  versionId: integer("version_id").notNull().references(() => kitVersions.id),
+  feedbackIds: text("feedback_ids", { mode: "json" }).$type<number[]>().notNull(),
+  themes: text("themes", { mode: "json" }).$type<StoredTheme[]>().notNull(),
+  createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+});
+
 export const proposals = sqliteTable("proposals", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   kitId: integer("kit_id").notNull().references(() => kits.id),
   baseVersionId: integer("base_version_id").notNull().references(() => kitVersions.id),
+  insightId: integer("insight_id"),
   feedbackIds: text("feedback_ids", { mode: "json" }).$type<number[]>().notNull(),
   instruction: text("instruction"),
   droppedCount: integer("dropped_count").notNull().default(0),
@@ -96,6 +115,7 @@ export const proposalHunks = sqliteTable("proposal_hunks", {
 export const ALL_TABLES = [
   "proposal_hunks",
   "proposals",
+  "insights",
   "feedback",
   "runs",
   "version_files",

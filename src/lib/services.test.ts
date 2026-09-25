@@ -3,6 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetDb } from "@/db";
 import { listFeedback, mergeFeedback, triageFeedback } from "./feedback/service";
+import { InsightsError, analyzeKit, getLatestInsights } from "./insights/service";
 import { kitFromEntries, readFolder } from "./kits/parse";
 import { KitError, createManualVersion, getKit, getVersionFiles, importKit, kitMetrics, setCurrentVersion } from "./kits/service";
 import { ProposalError, createProposal, decideHunk, getProposal, listProposals, publishProposal } from "./proposals/service";
@@ -61,8 +62,7 @@ describe("feedback", () => {
 describe("proposals and publish", () => {
   beforeEach(async () => {
     await report("s1", "MOCK:debug-partial");
-    triageFeedback(1, { status: "accepted" });
-    triageFeedback(2, { status: "accepted" });
+    await analyzeKit("debug-kit");
   });
 
   it("publishes accepted hunks as a new version and leaves the old one untouched", async () => {
@@ -155,5 +155,45 @@ describe("self-reports", () => {
   it("rejects unknown kits and versions", () => {
     expect(() => recordSelfReport({ kit: "nope", version: "1.0.0", projectPath: "", outcome: "success", corrections: [], tests: null })).toThrow(RunError);
     expect(() => recordSelfReport({ kit: "debug-kit", version: "9.9.9", projectPath: "", outcome: "success", corrections: [], tests: null })).toThrow(RunError);
+  });
+});
+
+describe("insights", () => {
+  it("needs feedback, then analyses every open item into themes", async () => {
+    await expect(analyzeKit("debug-kit")).rejects.toMatchObject({ code: "no_feedback" });
+    await report("s1", "MOCK:debug-partial");
+    await report("s3", "MOCK:debug-dup");
+    const insights = await analyzeKit("debug-kit");
+    expect(insights).toMatchObject({ version: "1.0.0", feedbackCount: 3, stale: false, newFeedbackCount: 0 });
+    // F1 and the duplicate (#3) share their first three words, so the mock merges them into one theme.
+    expect(insights.themes.map((t) => t.feedback_ids)).toEqual([[1, 3], [2]]);
+  });
+
+  it("goes stale on new feedback and on a new version, and Improve needs it", async () => {
+    await report("s1", "MOCK:debug-partial");
+    await expect(createProposal("debug-kit", {})).rejects.toMatchObject({ code: "no_insights" });
+    await analyzeKit("debug-kit");
+    await report("s3", "MOCK:debug-dup");
+    expect(getLatestInsights("debug-kit")).toMatchObject({ stale: true, newFeedbackCount: 1 });
+
+    await analyzeKit("debug-kit");
+    const proposal = await createProposal("debug-kit", {});
+    for (const h of proposal.hunks) decideHunk(h.id, { decision: "accepted" });
+    publishProposal(proposal.id, "minor");
+    expect(getLatestInsights("debug-kit")).toMatchObject({ stale: true, newFeedbackCount: 0 });
+    // Resolved items are still analysed (for recurrence), but no longer produce open themes in the mock.
+    const next = await analyzeKit("debug-kit");
+    expect(next.feedbackCount).toBe(3);
+    expect(next.themes).toEqual([]);
+  });
+
+  it("writes nothing when the analysis fails, and ignores dismissed items", async () => {
+    await report("s1", "MOCK:debug-partial");
+    await analyzeKit("debug-kit");
+    recordSelfReport({ kit: "debug-kit", version: "1.0.0", projectPath: "", outcome: "partial", corrections: [{ text: "MOCK:analyze-fail", quote: "x" }], tests: null });
+    await expect(analyzeKit("debug-kit")).rejects.toBeInstanceOf(InsightsError);
+    expect(getLatestInsights("debug-kit")!.feedbackCount).toBe(2);
+    triageFeedback(3, { status: "dismissed" });
+    expect((await analyzeKit("debug-kit")).feedbackCount).toBe(2);
   });
 });

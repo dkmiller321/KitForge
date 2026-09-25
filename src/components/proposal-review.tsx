@@ -23,7 +23,6 @@ interface Props {
   kit: string;
   proposalId: number;
   status: "draft" | "published" | "discarded";
-  feedbackIds: number[];
   droppedCount: number;
   hunks: ReviewHunk[];
 }
@@ -49,7 +48,7 @@ function blocks(lines: DiffLine[]): { kind: DiffLine["kind"]; lines: string[] }[
   return out;
 }
 
-export function ProposalReview({ kit, proposalId, status, feedbackIds, droppedCount, hunks }: Props) {
+export function ProposalReview({ kit, proposalId, status, droppedCount, hunks }: Props) {
   const router = useRouter();
   const [decisions, setDecisions] = useState<Record<number, Decision>>(Object.fromEntries(hunks.map((h) => [h.id, h.decision])));
   const [bump, setBump] = useState("minor");
@@ -93,7 +92,7 @@ export function ProposalReview({ kit, proposalId, status, feedbackIds, droppedCo
     const res = await fetch(`/api/kits/${kit}/proposals`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feedback_ids: feedbackIds, instruction: regenInstruction || undefined }),
+      body: JSON.stringify({ instruction: regenInstruction || undefined }),
     });
     if (!res.ok) {
       setRegenerating(false);
@@ -235,7 +234,7 @@ function HunkCard({
           {hunk.feedbackIds.map((id) => (
             <Link
               key={id}
-              href={`/inbox?tab=accepted#feedback-${id}`}
+              href={`/inbox#feedback-${id}`}
               data-testid="hunk-feedback-link"
               data-feedback-id={id}
               className="ml-1 font-mono text-xs text-forge hover:underline"

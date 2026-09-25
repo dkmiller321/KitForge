@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "new", label: "New" },
-  { key: "accepted", label: "Accepted" },
+  { key: "new", label: "Open" },
   { key: "resolved", label: "Resolved" },
+  { key: "dismissed", label: "Dismissed" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -18,15 +18,16 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const tab: TabKey = TABS.some((t) => t.key === query.tab) ? (query.tab as TabKey) : "new";
   const names = kitNames();
   const kit = query.kit && names.includes(query.kit) ? query.kit : undefined;
-  const items = listFeedback({ kit, status: tab });
+  // Items accepted under the old triage flow count as open.
+  const items = listFeedback({ kit }).filter((f) => (tab === "new" ? f.status === "new" || f.status === "accepted" : f.status === tab));
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Feedback</h1>
         <p className="text-sm text-muted-foreground">
-          Feedback from every run. <kbd className="kbd">j</kbd>/<kbd className="kbd">k</kbd> to move, <kbd className="kbd">a</kbd> to
-          accept, <kbd className="kbd">d</kbd> to dismiss.
+          Everything reported from every run. All open feedback goes into each kit&apos;s analysis; dismiss only noise.{" "}
+          <kbd className="kbd">j</kbd>/<kbd className="kbd">k</kbd> to move, <kbd className="kbd">d</kbd> to dismiss.
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border">

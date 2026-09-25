@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { feedback, kitVersions, kits, runs, versionFiles } from "@/db/schema";
+import { kitVersions, kits, runs, versionFiles } from "@/db/schema";
 import { aggregateMetrics, successRate, type VersionMetrics } from "@/lib/metrics";
 import { listRuns } from "@/lib/runs/service";
 import { contentHash, sortFiles, type FileEntry } from "./hash";
@@ -174,15 +174,6 @@ export function createBlankKit(name: string): KitDetail {
     .join(" ");
   const skill = `---\nname: ${name}\ndescription: Describe when Claude Code should use this kit.\n---\n\n# ${title}\n\n1. First rule.\n`;
   return importKit({ name, title, files: [{ path: "SKILL.md", content: skill }] });
-}
-
-export function acceptedCount(kitId: number): number {
-  const row = getDb()
-    .select({ n: sql<number>`count(*)` })
-    .from(feedback)
-    .where(and(eq(feedback.kitId, kitId), eq(feedback.status, "accepted")))
-    .get();
-  return row?.n ?? 0;
 }
 
 export function versionSemvers(ids: number[]): Map<number, string> {

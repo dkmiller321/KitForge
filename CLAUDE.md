@@ -21,7 +21,7 @@ If this file and the PRD disagree, the PRD wins. If the PRD and E2E_TESTS.md dis
 | Validation | zod (env, API inputs, LLM outputs) |
 | Zip | `adm-zip` (import in the app; fixture zips in tests) |
 | CLI | `commander`, run with `tsx` in dev; `bin/kit` entry for `npm link` |
-| LLM | `@anthropic-ai/sdk` |
+| LLM | OpenRouter chat completions via `fetch` (no SDK); key in `OPENROUTER_API_KEY` |
 | Tests | Vitest (unit/API), `@playwright/test` (E2E) |
 
 These packages are pre-approved. **Ask before adding any other runtime dependency.** Dev-only tooling (types, lint config) is fine.
@@ -47,7 +47,7 @@ These packages are pre-approved. **Ask before adding any other runtime dependenc
 - Layout: `src/app/` (routes and API handlers), `src/components/`, `src/lib/` (server logic), `src/lib/llm/` (`index.ts`, `anthropic.ts`, `mock.ts`, `schemas.ts`), `src/lib/kits/` (import, hash, semver, hunks), `src/cli/` (commander entry and one file per command), `src/db/` (schema, migrations), `e2e/` (specs, `helpers/`, `fixtures/`).
 - Env is read once in `src/lib/env.ts` with zod; nothing else reads `process.env`. The CLI has its own small `src/cli/env.ts` (only `KITFORGE_URL`, `KITFORGE_REPORT_TIMEOUT_MS`).
 - Core logic is pure and unit-tested: `detectKits`, `trimTranscript`, `contentHash`, `bumpSemver`, `editsToHunks`, `applyHunks`, `aggregateMetrics`, `mergeHookSettings`. Route handlers and CLI commands only wire these together.
-- The real LLM client uses forced tool use (one tool per call, whose input schema is the zod schema) to get structured JSON; its output passes the same zod validation as the mock.
+- The real LLM client (`src/lib/llm/openrouter.ts`) offers one tool per call, whose parameters are the zod schema, with `tool_choice: "auto"` and a system prompt that requires calling it (forced tool choice is rejected by some current models); a JSON text answer is accepted as a fallback. Its output passes the same zod validation as the mock.
 - DB writes that belong together (publish: new version + files + changelog + feedback resolution + proposal status) run in one SQLite transaction.
 - Errors: one handler per route returning `{ error: <code> }` with the right status. No blanket try/catch or retry wrappers, except the CLI's report path, which is designed to swallow failures.
 - CLI output lines are part of the contract (E2E_TESTS.md). When a report both sends and queues, print both lines: `Reported N run(s)` then `Queued M report(s)`.

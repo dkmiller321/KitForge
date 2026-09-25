@@ -3,7 +3,8 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { runKit, tmpHome } from "./helpers/cli";
 import {
-  acceptInInbox,
+  analyze,
+  analyzeViaApi,
   feedbackList,
   fixtureFile,
   getJson,
@@ -14,7 +15,6 @@ import {
   pull,
   report,
   resetDb,
-  setStatusViaApi,
   setupProposal,
   setupPublished,
   setupReported,
@@ -31,13 +31,15 @@ test.beforeEach(async ({ request }) => {
   home = tmpHome();
 });
 
-test("E2E-18 @stage5 proposal from accepted feedback (I1, I2, U7)", async ({ page, request }) => {
+test("E2E-18 @stage5 proposal from the kit's insights (A1, I1, I2, U7)", async ({ page, request }) => {
   await setupReported(page, home);
   const [f1, f2] = await x1Ids(request);
-  await acceptInInbox(page, [f1, f2]);
 
   await page.goto("/kits/debug-kit");
-  await expect(page.getByTestId("improve-count")).toHaveText("2 accepted");
+  await expect(page.getByTestId("improve-count")).toHaveText("0 themes");
+  await expect(page.getByTestId("improve-button")).toBeDisabled();
+  await analyze(page);
+  await expect(page.getByTestId("improve-count")).toHaveText("2 themes");
   await page.getByTestId("improve-button").click();
   await page.getByTestId("improve-submit").click();
   await expect(page.getByTestId("proposal-loading")).toBeVisible();
@@ -64,7 +66,7 @@ test("E2E-18 @stage5 proposal from accepted feedback (I1, I2, U7)", async ({ pag
 });
 
 test("E2E-19 @stage5 ★ THE CORE LOOP: feedback becomes a better installed kit", async ({ page, request }) => {
-  // 1–2. Import, pull, report partial; accept F1 and F2; Improve; accept both hunks; publish (minor).
+  // 1–2. Import, pull, report partial; Analyze; Improve; accept both hunks; publish (minor).
   const [f1, f2] = await setupPublished(page, request, home);
 
   // 3. Redirected to the kit, now at 1.1.0 with the new rule.
@@ -147,15 +149,17 @@ test("E2E-20 @stage5 partial accept and patch bump (I2, I3, I4)", async ({ page,
   await page.getByTestId("nav-inbox").click();
   await page.getByTestId("inbox-tab-resolved").click();
   await expect(inboxItem(page, f1).getByTestId("feedback-status")).toHaveText("Resolved in 1.0.1");
-  await page.getByTestId("inbox-tab-accepted").click();
+  // F2's change was rejected, so F2 stays open; the insights now predate 1.0.1.
+  await page.getByTestId("inbox-tab-new").click();
   await expect(inboxItem(page, f2)).toBeVisible();
-  await page.goto("/kits/debug-kit");
-  await expect(page.getByTestId("improve-count")).toHaveText("1 accepted");
+  await expect(inboxItem(page, f2).getByTestId("feedback-status")).toHaveText("new");
+  await page.goto("/kits/debug-kit?tab=insights");
+  await expect(page.getByTestId("insights-stale")).toContainText("newer version");
 });
 
 test("E2E-21 @stage5 unusable edits are dropped (I1 rule)", async ({ page, request }) => {
   await setupReported(page, home);
-  for (const id of await x1Ids(request)) await setStatusViaApi(request, id, "accepted");
+  await analyzeViaApi(request);
   await improve(page, "MOCK:bad-hunk");
   await expect(page).toHaveURL(/\/kits\/debug-kit\/proposals\/\d+$/);
   await expect(page.getByTestId("proposal-hunk")).toHaveCount(1);
@@ -165,12 +169,12 @@ test("E2E-21 @stage5 unusable edits are dropped (I1 rule)", async ({ page, reque
 test("E2E-22 @stage5 proposal failure is atomic (I1, Reliability)", async ({ page, request }) => {
   await setupReported(page, home);
   const ids = await x1Ids(request);
-  for (const id of ids) await setStatusViaApi(request, id, "accepted");
+  await analyzeViaApi(request);
   await improve(page, "MOCK:proposal-fail");
   await expect(page.getByTestId("proposal-error")).toHaveText("Couldn't generate a proposal. Nothing was changed.");
   await expect(page).toHaveURL(/\/kits\/debug-kit$/);
   expect(await getJson<unknown[]>(request, "/api/proposals?kit=debug-kit&status=draft")).toEqual([]);
   expect((await getJson<KitDto>(request, "/api/kits/debug-kit")).currentVersion).toBe("1.0.0");
   const items = await feedbackList(request, "?kit=debug-kit");
-  for (const id of ids) expect(items.find((f) => f.id === id)?.status).toBe("accepted");
+  for (const id of ids) expect(items.find((f) => f.id === id)?.status).toBe("new");
 });

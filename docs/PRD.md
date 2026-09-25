@@ -99,18 +99,26 @@ Requirements are grouped by area; P0 = v1 must have, P1 = v1 should have, P2 = l
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | T1 | Inbox lists untriaged feedback across all kits, newest first, filterable by kit | P0 |
-| T2 | Actions per item: accept (queue for improvement), dismiss, tag | P0 |
+| T2 | Actions per item: dismiss (noise only; restorable) and tag. No accept step: every open item feeds the analysis (changed 2026-09-25) | P0 |
 | T3 | Merge duplicate items into one, keeping all source runs | P1 |
 | T4 | Suggested duplicates highlighted automatically | P2 |
+
+**Insights (A)** (added 2026-09-25)
+
+| ID | Requirement | Priority |
+| --- | --- | --- |
+| A1 | "Analyze" on a kit sends all of its open and resolved feedback, from every run and version, plus the current files to the LLM, which returns ranked themes: title, problem, suggested kit change, priority (high/medium/low) and the feedback ids each covers. Duplicates across runs merge into one theme | P0 |
+| A2 | The newest analysis is stored and shown on the kit's Insights tab; it is marked stale when new feedback arrives or a newer version becomes current | P0 |
+| A3 | Analysis runs only when the user clicks Analyze. A failed analysis writes nothing and keeps the previous insights | P0 |
 
 **Improve and review (I)**
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
-| I1 | "Improve" on a kit sends its current files plus accepted feedback to Claude and returns a proposal: find/replace edits shown as diff hunks, each with a one-line rationale citing feedback IDs | P0 |
+| I1 | "Improve" on a kit sends its current files plus the latest insights (themes) to the LLM and returns a proposal: find/replace edits shown as diff hunks, each with a one-line rationale citing feedback IDs. A hunk that addresses a theme cites all of that theme's feedback | P0 |
 | I2 | Review screen shows the diff per file; each hunk has Accept and Reject | P0 |
 | I3 | Publish applies accepted hunks, bumps the version (minor by default, patch or major selectable) and writes a changelog entry linking each change to its feedback | P0 |
-| I4 | Feedback used in a published version is marked resolved with that version number | P0 |
+| I4 | Feedback cited by published hunks is marked resolved with that version number; everything else stays open for the next analysis | P0 |
 | I5 | Edit a hunk's text before accepting | P1 |
 | I6 | Regenerate the proposal with an extra instruction | P1 |
 
@@ -134,7 +142,7 @@ KitForge runs locally, keeps transcripts on the machine, and must be fully testa
 | Security | Localhost only (bound to 127.0.0.1); API key in `.env`, never sent to the browser |
 | Privacy | Raw transcripts are never stored or uploaded anywhere except the extraction call; only extracted quotes (under 300 characters each) are stored |
 | Deployment | `npm run dev` / `npm start` on the user's machine; single SQLite file at `~/.kitforge/kitforge.db` |
-| Configuration | `.env`: `ANTHROPIC_API_KEY`, `KITFORGE_MODEL`, `KITFORGE_PORT` (default 4317), KITFORGE\_HOST, KITFORGE\_DB\_PATH, KITFORGE\_URL (where the CLI finds the app), KITFORGE\_REPORT\_TIMEOUT\_MS, `KITFORGE_LLM_MODE` (`real` or `mock`) |
+| Configuration | `.env`: `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` (optional), `KITFORGE_MODEL`, `KITFORGE_PORT` (default 4317), KITFORGE\_HOST, KITFORGE\_DB\_PATH, KITFORGE\_URL (where the CLI finds the app), KITFORGE\_REPORT\_TIMEOUT\_MS, `KITFORGE_LLM_MODE` (`real` or `mock`) |
 | Testability | `KITFORGE_LLM_MODE=mock` returns scripted extraction and proposal fixtures; a small @smoke suite calls the real API; each stage is verified by Playwright specs plus a walkthrough with the playwright-headless MCP server; every interactive element has a `data-testid` |
 | Accessibility | Keyboard-operable inbox (j/k to move, a/d to accept/dismiss) and diff review |
 | Cost | Extraction under $0.05 per run and a proposal under $0.25 at default model pricing |
@@ -177,7 +185,7 @@ The CLI installs kits and reports runs; the API owns all LLM calls and storage.
 | Markdown | `react-markdown` + `remark-gfm` | Render SKILL.md and references |
 | Database | SQLite via `better-sqlite3` + Drizzle ORM | Single local file, zero setup |
 | CLI | Node + `commander`, shipped as `bin/kit` in the same repo | Shares types with the app |
-| LLM | `@anthropic-ai/sdk`, model from `KITFORGE_MODEL`; mock adapter behind the same interface | Deterministic tests |
+| LLM | OpenRouter chat completions (plain `fetch`, OpenAI-compatible tool calling), model from `KITFORGE_MODEL`; mock adapter behind the same interface (changed 2026-09-25 from `@anthropic-ai/sdk`) | Provider choice; deterministic tests |
 | Tests | Vitest (unit/API) + `@playwright/test` (E2E) | Tests-first build |
 
 ### Data model
@@ -189,7 +197,8 @@ The CLI installs kits and reports runs; the API owns all LLM calls and storage.
 | version\_files | version\_id, path, content | Full snapshot per version |
 | runs | id, session\_id, kit\_version\_id, project\_path, started\_at, ended\_at, outcome, outcome\_overridden, tests\_passed, tests\_failed | One row per kit used per session; (session\_id, kit) unique together |
 | feedback | id, run\_id, kit\_id, kind (correction/note/rating), text, quote, rating, tags, status (new/accepted/dismissed/merged/resolved), merged\_into\_id, resolved\_in\_version\_id | The inbox |
-| proposals | id, kit\_id, base\_version\_id, feedback\_ids, instruction, status (draft/published/discarded) | One active draft per kit |
+| insights | id, kit\_id, version\_id, feedback\_ids, themes (json), created\_at | One row per analysis; newest is current |
+| proposals | id, kit\_id, base\_version\_id, insight\_id, feedback\_ids, instruction, status (draft/published/discarded) | One active draft per kit |
 | proposal\_hunks | id, proposal\_id, file\_path, find\_text, replace\_text, edited\_replace, rationale, feedback\_ids, decision (pending/accepted/rejected) | Reviewed one by one |
 
 ### Key interfaces
@@ -205,12 +214,14 @@ The CLI installs kits and reports runs; the API owns all LLM calls and storage.
 | `POST /api/runs/:id/notes` | text, rating | Adds manual feedback |
 | `PATCH /api/feedback/:id` | status, tags | Triage |
 | `POST /api/feedback/merge` | ids\[\] | Merges into the first id |
-| `POST /api/kits/:name/proposals` | feedback\_ids, instruction? | Generates a proposal with hunks |
+| `POST /api/kits/:name/insights` / `GET` | — | Analyze all feedback into ranked themes / read the latest analysis (with `stale`, `newFeedbackCount`) |
+| `POST /api/kits/:name/proposals` | instruction? | Generates a proposal with hunks from the latest insights |
 | `PATCH /api/hunks/:id` | decision, edited\_replace? | Review one hunk |
 | `POST /api/proposals/:id/publish` | bump (patch/minor/major) | New version, changelog, resolves feedback |
 | `GET /api/kits/:name/metrics` | — | Per-version run count, success rate, corrections/run |
 | LLM `extractRun(transcript)` | trimmed transcript | `{outcome, corrections:[{text, quote}], tests:{passed, failed}}` |
-| LLM `proposeImprovement(files, feedback)` | current files, feedback items | `{edits:[{file, find, replace, rationale, feedback_ids}]}` |
+| LLM `analyzeFeedback(kit, version, files, feedback)` | current files, every open/resolved feedback item | `{themes:[{title, problem, suggestion, priority, feedback_ids}]}` |
+| LLM `proposeImprovement(files, themes, instruction?)` | current files, latest themes | `{edits:[{file, find, replace, rationale, feedback_ids}]}` |
 
 ### Rules that are easy to get wrong
 
@@ -231,6 +242,7 @@ Six stages take KitForge from skeleton to the full run → feedback → new vers
 | 3 Run capture | L3, L4, R1–R4 | `kit report` on the fixture transcript creates one run for debug-kit 1.0.0 with outcome "partial" and 2 corrections, visible in the kit's Runs tab; a second identical report creates nothing |
 | 4 Inbox | T1, T2, L5, R5 | Both corrections appear in the Inbox; accepting one and dismissing the other leaves 0 untriaged; `kit note` adds a third item |
 | 5 Improve and publish | I1–I4, M1 | Improve on 2 accepted items returns 2 hunks with rationales; accepting both and publishing creates debug-kit 1.1.0 whose SKILL.md contains the new rule, whose changelog links both items, and both items show "Resolved in 1.1.0"; `kit pull` now installs 1.1.0 |
+| 8 Insights and OpenRouter (added 2026-09-25) | A1–A3, T2/I1/I4 changes | Analyze turns every open feedback item into ranked themes (duplicates merged) with no triage; Improve proposes edits from them; publishing resolves every item in each addressed theme; the real LLM path goes through OpenRouter |
 | 7 Self-reporting (added 2026-09-25) | L7 | A self-report POSTed to `/api/runs/report` creates one run with its corrections; the Download for Claude zip and `kit pull --report` put the reporting step at the end of SKILL.md, and running that step as written records a run |
 | 6 Polish (P1) | K6–K8, T3, I5, I6, M2, R6 | Compare shows 1.0.0 vs 1.1.0 metrics side by side; rollback to 1.0.0 makes `kit pull` install 1.0.0; merging 2 items leaves 1 with both runs listed |
 
@@ -250,6 +262,7 @@ KitForge succeeds if kits measurably need fewer corrections after each published
 
 **Change log**
 
+- 2026-09-25: No triage. The user doesn't want to decide which feedback drives improvements. All feedback is collected; **Analyze** (on demand) distils it into ranked themes; Improve works from the themes; the user still reviews the diff before publishing (auto-publish stays a non-goal). LLM provider switched to OpenRouter.
 - 2026-09-25: Run capture moved from the SessionEnd hook (L3/L4) to a self-report step inside each kit (L7). Reason: kits synced by Claude live outside `~/.claude/skills/<name>/`, so hook-based detection never saw them. Trade-off accepted: sessions that end before the final step (closed early, crashed) are not recorded, and the report is Claude's own account rather than an independent extraction. The hook code stays in the repo, unused, so it can return as a backup.
 
 **Risks**

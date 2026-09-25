@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { Suspense } from "react";
+import { InboxBadge } from "@/components/inbox-badge";
 import { countNewFeedback } from "@/lib/feedback/service";
 import "./globals.css";
 
@@ -36,12 +38,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 href="/inbox"
                 className="flex items-center gap-2 rounded-md px-3 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
               >
-                Inbox
-                {inboxCount > 0 && (
-                  <span data-testid="inbox-count" className="rounded-full bg-forge px-1.5 py-0.5 text-[11px] leading-none font-semibold text-white">
-                    {inboxCount}
-                  </span>
-                )}
+                Feedback
+                <Suspense fallback={null}>
+                  <InboxBadge initial={inboxCount} />
+                </Suspense>
               </Link>
             </nav>
           </div>

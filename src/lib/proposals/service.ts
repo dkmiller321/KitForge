@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { feedback, kitVersions, kits, proposalHunks, proposals } from "@/db/schema";
+import { getLatestInsights } from "@/lib/insights/service";
 import { getLlm } from "@/lib/llm";
 import { HunkConflictError, applyHunks, editsToHunks } from "@/lib/kits/hunks";
 import { filesForVersion, insertVersion, requireKit } from "@/lib/kits/service";
@@ -41,29 +42,23 @@ export interface ProposalDto {
   hunks: HunkDto[];
 }
 
-/** I1: ask the LLM for find/replace edits against the current version; keep only edits that apply. */
-export async function createProposal(kitName: string, opts: { feedbackIds?: number[]; instruction?: string }): Promise<ProposalDto> {
+/** I1: ask the LLM for find/replace edits that address the kit's latest insights; keep only edits that apply. */
+export async function createProposal(kitName: string, opts: { instruction?: string }): Promise<ProposalDto> {
   const db = getDb();
   const kit = requireKit(kitName);
-  const accepted = db
-    .select({ id: feedback.id, text: feedback.text, quote: feedback.quote })
-    .from(feedback)
-    .where(and(eq(feedback.kitId, kit.id), eq(feedback.status, "accepted")))
-    .orderBy(asc(feedback.id))
-    .all();
-  const chosen = opts.feedbackIds?.length ? accepted.filter((f) => opts.feedbackIds!.includes(f.id)) : accepted;
-  if (chosen.length === 0) throw new ProposalError("no_accepted_feedback", 400);
+  const latest = getLatestInsights(kit.name);
+  if (!latest || latest.themes.length === 0) throw new ProposalError("no_insights", 400);
 
   const files = filesForVersion(kit.currentVersionId);
   const instruction = opts.instruction?.trim() || undefined;
   let proposal;
   try {
-    proposal = await getLlm().proposeImprovement({ files, feedback: chosen, instruction });
+    proposal = await getLlm().proposeImprovement({ files, themes: latest.themes, instruction });
   } catch {
     throw new ProposalError("proposal_failed", 502);
   }
 
-  const known = new Set(chosen.map((f) => f.id));
+  const known = new Set(latest.themes.flatMap((t) => t.feedback_ids));
   const { hunks, dropped } = editsToHunks(files, proposal.edits);
   const id = db.transaction(() => {
     db.update(proposals)
@@ -72,11 +67,22 @@ export async function createProposal(kitName: string, opts: { feedbackIds?: numb
       .run();
     const row = db
       .insert(proposals)
-      .values({ kitId: kit.id, baseVersionId: kit.currentVersionId, feedbackIds: [...known], instruction: instruction ?? null, droppedCount: dropped })
+      .values({
+        kitId: kit.id,
+        baseVersionId: kit.currentVersionId,
+        insightId: latest.id,
+        feedbackIds: [...known],
+        instruction: instruction ?? null,
+        droppedCount: dropped,
+      })
       .returning({ id: proposals.id })
       .get();
     hunks.forEach((h, position) => {
-      const cited = h.feedbackIds.filter((f) => known.has(f));
+      // A hunk that addresses a theme addresses all of the theme's feedback, not only the ids the model cited.
+      const direct = h.feedbackIds.filter((f) => known.has(f));
+      const cited = [...new Set(latest.themes.filter((t) => t.feedback_ids.some((id) => direct.includes(id))).flatMap((t) => t.feedback_ids))].sort(
+        (x, y) => x - y,
+      );
       db.insert(proposalHunks)
         .values({
           proposalId: row.id,
@@ -204,7 +210,7 @@ export function publishProposal(proposalId: number, bump: Bump): { version: stri
     if (resolvedIds.length) {
       db.update(feedback)
         .set({ status: "resolved", resolvedInVersionId: versionId })
-        .where(and(inArray(feedback.id, resolvedIds), eq(feedback.kitId, kit.id)))
+        .where(and(inArray(feedback.id, resolvedIds), eq(feedback.kitId, kit.id), inArray(feedback.status, ["new", "accepted"])))
         .run();
     }
     db.update(proposals).set({ status: "published" }).where(eq(proposals.id, proposalId)).run();

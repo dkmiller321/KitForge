@@ -136,13 +136,16 @@ export async function setStatusViaApi(request: APIRequestContext, id: number, st
   expect(res.ok()).toBeTruthy();
 }
 
-/** Accept F1 and F2 through the inbox UI. */
-export async function acceptInInbox(page: Page, ids: number[]): Promise<void> {
-  await page.getByTestId("nav-inbox").click();
-  for (const id of ids) {
-    await inboxItem(page, id).getByTestId("feedback-accept").click();
-    await expect(inboxItem(page, id)).toHaveCount(0);
-  }
+/** Insights tab → Analyze, and wait for the themes. */
+export async function analyze(page: Page, kit = "debug-kit"): Promise<void> {
+  await page.goto(`/kits/${kit}?tab=insights`);
+  await page.getByTestId("analyze-button").click();
+  await expect(page.getByTestId("insight-theme").first()).toBeVisible();
+}
+
+export async function analyzeViaApi(request: APIRequestContext, kit = "debug-kit"): Promise<void> {
+  const res = await request.post(`/api/kits/${kit}/insights`);
+  expect(res.status()).toBe(201);
 }
 
 /** Opens the kit, runs Improve (optionally with an instruction) and waits for the proposal page. */
@@ -153,18 +156,18 @@ export async function improve(page: Page, instruction?: string): Promise<void> {
   await page.getByTestId("improve-submit").click();
 }
 
-/** E2E-18's setup up to "both hunks shown". Returns F1, F2. */
+/** E2E-18's setup up to "both hunks shown" (report, Analyze, Improve). Returns F1, F2. */
 export async function setupProposal(page: Page, request: APIRequestContext, home: string): Promise<[number, number]> {
   await setupReported(page, home);
   const ids = await x1Ids(request);
-  await acceptInInbox(page, ids);
+  await analyze(page);
   await improve(page);
   await expect(page).toHaveURL(/\/kits\/debug-kit\/proposals\/\d+$/);
   await expect(page.getByTestId("proposal-hunk")).toHaveCount(2);
   return ids;
 }
 
-/** E2E-19 steps 1–2: publish 1.1.0 from both hunks. Returns F1, F2. */
+/** E2E-19 steps 1–2: report, Analyze, Improve, accept both hunks, publish 1.1.0. Returns F1, F2. */
 export async function setupPublished(page: Page, request: APIRequestContext, home: string): Promise<[number, number]> {
   const ids = await setupProposal(page, request, home);
   await hunkForFile(page, "SKILL.md").getByTestId("hunk-accept").click();

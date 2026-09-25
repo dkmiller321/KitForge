@@ -4,18 +4,21 @@ import { Changelog } from "@/components/changelog";
 import { EditKit } from "@/components/edit-kit";
 import { FilesTab } from "@/components/files-tab";
 import { ImproveButton } from "@/components/improve-button";
+import { InsightsTab } from "@/components/insights-tab";
 import { MarkdownView } from "@/components/markdown-view";
 import { MetricsTab } from "@/components/metrics-tab";
 import { RunsTab } from "@/components/runs-tab";
 import { SetCurrentButton } from "@/components/set-current-button";
 import { VersionDiff } from "@/components/version-diff";
-import { acceptedCount, filesForVersion, getKit, kitMetrics } from "@/lib/kits/service";
+import { listFeedback } from "@/lib/feedback/service";
+import { getLatestInsights } from "@/lib/insights/service";
+import { filesForVersion, getKit, kitMetrics } from "@/lib/kits/service";
 import { listRuns } from "@/lib/runs/service";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-const TABS = ["files", "versions", "runs", "metrics"] as const;
+const TABS = ["files", "insights", "versions", "runs", "metrics"] as const;
 type Tab = (typeof TABS)[number];
 
 export default async function KitPage({
@@ -30,7 +33,8 @@ export default async function KitPage({
   const kit = getKit(name);
   if (!kit) notFound();
   const tab: Tab = (TABS as readonly string[]).includes(query.tab ?? "") ? (query.tab as Tab) : "files";
-  const accepted = acceptedCount(kit.id);
+  const insights = getLatestInsights(kit.name);
+  const themeCount = insights?.themes.length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -51,7 +55,7 @@ export default async function KitPage({
         </div>
         <div className="flex items-center gap-3">
           <span data-testid="improve-count" className="text-sm text-muted-foreground">
-            {accepted} accepted
+            {themeCount} {themeCount === 1 ? "theme" : "themes"}
           </span>
           <a
             data-testid="export-button"
@@ -62,7 +66,7 @@ export default async function KitPage({
             Download for Claude
           </a>
           <EditKit key={kit.currentVersion} kit={kit.name} version={kit.currentVersion} files={filesForVersion(kit.currentVersionId)} />
-          <ImproveButton kit={kit.name} accepted={accepted} />
+          <ImproveButton kit={kit.name} themes={themeCount} stale={insights?.stale ?? false} />
         </div>
       </div>
 
@@ -84,6 +88,9 @@ export default async function KitPage({
       </nav>
 
       {tab === "files" && <FilesSection kitName={kit.name} versions={kit.versions} requested={query.version} />}
+      {tab === "insights" && (
+        <InsightsTab kit={kit.name} insights={insights} openFeedback={listFeedback({ kit: kit.name, status: "new" }).length} />
+      )}
       {tab === "runs" && <RunsTab runs={listRuns(kit.name)} />}
       {tab === "metrics" && <MetricsTab kit={kit.name} metrics={kitMetrics(kit.name)} />}
       {tab === "versions" && kit.versions.length > 1 && <VersionDiff kit={kit.name} versions={kit.versions.map((v) => v.semver)} />}

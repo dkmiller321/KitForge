@@ -181,13 +181,13 @@ Fixes from the walkthrough: the compare-page selects, diff selects and edit dial
 ### Run KitForge yourself (Windows, Git Bash or PowerShell, from the repo root)
 
 1. Install: `npm install`
-2. Configure `.env` for real use. **Mock mode is for tests only**: it fakes extraction and exposes `/api/test/reset`, which deletes every row.
+2. Configure `.env` for real use. **Mock mode is for tests only**: it fakes the LLM and exposes `/api/test/reset`, which deletes every row.
    ```
    KITFORGE_LLM_MODE=real
-   ANTHROPIC_API_KEY=sk-ant-...
-   KITFORGE_MODEL=claude-opus-5
+   OPENROUTER_API_KEY=sk-or-...
+   KITFORGE_MODEL=<OpenRouter model id with tool calling, e.g. inclusionai/ling-3.0-flash-vl>
    ```
-   (Any current model id works; a smaller model lowers the per-run cost.) The DB stays at `~/.kitforge/kitforge.db`.
+   (`OPENROUTER_BASE_URL` is optional.) The DB stays at `~/.kitforge/kitforge.db`.
 3. Start the app: `npm run build` then `npm start` (or `npm run dev`). Open http://127.0.0.1:4317.
 4. Put the CLI on your PATH: `npm link`, then check with `kit --help`.
 5. (Replaced 2026-09-25, see Stage 7 below.) Don't install the SessionEnd hook; kits report themselves.
@@ -196,7 +196,8 @@ Fixes from the walkthrough: the compare-page selects, diff selects and edit dial
    - For a kit Claude syncs for you (like Idea-to-Build Kit): open it in KitForge → **Download for Claude** → upload that zip to Claude as the skill, replacing the current one. Every session that uses it then ends by reporting to KitForge.
    - For a kit you keep in `~/.claude/skills/<name>/`: back up the folder, then run `kit pull <name> --report`.
    - Repeat after every new version you publish, so the step carries the right version number.
-7. Optional, with the key set: `RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep @smoke`, and `KITFORGE_SMOKE_TRANSCRIPT=<a real ~/.claude/projects/…/*.jsonl that read a kit> RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep SMOKE-4`.
+7. To improve a kit: open it → **Insights** → **Analyze feedback** → **Improve** → review the diff → Publish → Download for Claude again.
+8. Optional, with the key and model set: `RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep @smoke`, and `KITFORGE_SMOKE_TRANSCRIPT=<a real ~/.claude/projects/…/*.jsonl that read a kit> RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep SMOKE-4`.
 
 ## Stage 7 — Self-reporting (2026-09-25, user-requested change)
 
@@ -216,3 +217,25 @@ Walkthrough:
 - E2E-31: pass. E2E-32: pass (as specs; E2E-32 also runs the step's JSON template as written).
 
 Not verified: a real Claude Code session following the step on its own (that needs a live session using a kit with the step), and the upload of the zip to Claude as a skill.
+
+## Stage 8 — Insights instead of triage; OpenRouter (2026-09-25, user-requested change)
+
+The user doesn't want to pick which feedback is used. All feedback is collected; **Analyze** (on demand, the user's choice) turns it into ranked themes; Improve works from them; the user still reviews the diff (the user's choice). The LLM provider is now OpenRouter. See DECISIONS #27–32, PRD A1–A3 and E2E-14/17/18/20/21/22 (rewritten) and E2E-33 (new).
+
+Commands:
+
+- `npx tsc --noEmit`: clean. `npx eslint src e2e`: clean. `@anthropic-ai/sdk` uninstalled.
+- `npm test`: 48 passed (new: mock analysis grouping and failure, insights schema, OpenRouter response parsing with tool-call / fenced / bare JSON / empty, analysis storage and staleness, Improve requiring insights, a failed analysis writing nothing, dismissed items excluded).
+- `npx playwright test --grep "@stage4|@stage5|@stage6|@stage8" --retries=0`: first run 17 passed, 1 failed (E2E-14: the nav badge stayed at 1 after Restore; fixed, DECISIONS #31).
+- `npx playwright test` (all non-smoke): 34 passed, 0 failed.
+- The unit tests also caught that a hunk only resolved the ids the model cited, leaving a merged duplicate open after its fix shipped; fixed (DECISIONS #30).
+
+MCP walkthrough (`playwright-headless`, production build, mock mode, scratch DB):
+
+- Seeded with report partial (sess-001), the dup transcript (sess-003) and a note: 4 items.
+- Insights tab before analysis: "Not analyzed yet. Analyze reads all 4 open feedback items…", `0 themes`, Improve disabled.
+- Analyze → 3 themes: `high` "Wrote the fix before writing a failing test" with #1 and #3 (the duplicate from the second session merged in), then #2 and #4; `3 themes`; Improve enabled.
+- Improve → Proposal #1: the SKILL.md hunk cites #1 and #3, the checklist hunk cites #2.
+- Feedback page: "Feedback" in the nav with badge 4; tabs Open / Resolved / Dismissed; each item has Dismiss only, with no Accept.
+
+Not verified: the real OpenRouter path. `OPENROUTER_API_KEY` is set in `.env`, but `KITFORGE_MODEL` is empty and the mode is `mock`, so the smoke suite skips. OpenRouter's public model list confirms that `inclusionai/ling-3.0-flash-vl` (the model named in the user's `DEFAULT_MODEL`) supports `tools`, `tool_choice` and structured outputs.

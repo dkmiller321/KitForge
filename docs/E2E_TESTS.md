@@ -110,7 +110,7 @@ Trimming (pure function `trimTranscript(lines): string`, unit-tested): keep user
 
 ### 1.5 The mock LLM
 
-`src/lib/llm/index.ts` exports `getLlm(): KitLlm` with `extractRun(transcript: string)` and `proposeImprovement(input: { files, feedback, instruction? })`. When `KITFORGE_LLM_MODE=mock` it returns `src/lib/llm/mock.ts`, which sits **behind the same interface**: the real route handlers, zod validation of the LLM output, find/replace validation, diff rendering and DB writes all run unchanged. The mock never talks to the network.
+`src/lib/llm/index.ts` exports `getLlm(): KitLlm` with `extractRun(transcript: string)`, `analyzeFeedback(input: { kit, version, files, feedback })` and `proposeImprovement(input: { files, themes, instruction? })`. When `KITFORGE_LLM_MODE=mock` it returns `src/lib/llm/mock.ts`, which sits **behind the same interface**: the real route handlers, zod validation of the LLM output, find/replace validation, diff rendering and DB writes all run unchanged. The mock never talks to the network.
 
 Mock calls wait 300 ms before resolving so loading states are observable (`proposal-loading`).
 
@@ -125,7 +125,9 @@ Mock calls wait 300 ms before resolving so loading states are observable (`propo
 | X5 extract-fail | `MOCK:extract-fail` | Throws. `POST /api/runs` returns 502 `{ error: "extraction_failed" }` and writes nothing. |
 | X0 default | no marker | `{ outcome: "success", corrections: [], tests: null }` |
 
-**`proposeImprovement` matching:** on `instruction` (lower-cased, `contains`), else default. Feedback is passed sorted by id ascending; below, `F[0]`, `F[1]` are those ids.
+**`analyzeFeedback` (mock, added 2026-09-25):** open items (status `new`) in id order; items whose text starts with the same three words (lower-cased) form one theme; theme order follows each theme's first item; the first theme is `high`, the rest `medium`; `title` = first item's text, `problem` = its quote (or text), `suggestion` = `Add a rule to the kit that prevents: <text>`. Resolved items are passed in but produce no theme. Any feedback text containing `MOCK:analyze-fail` makes the call throw: `POST /api/kits/:name/insights` returns 502 `{ error: "analysis_failed" }` and writes nothing.
+
+**`proposeImprovement` matching:** on `instruction` (lower-cased, `contains`), else default. `F[0]`, `F[1]` below are the feedback ids of all themes, de-duplicated and sorted ascending. When the proposal is stored, each hunk's cited ids expand to every feedback item in the themes they belong to.
 
 | Script | Instruction contains | Exact edits returned |
 |---|---|---|
@@ -144,6 +146,8 @@ Mock calls wait 300 ms before resolving so loading states are observable (`propo
 | `GET /api/runs?kit=` | runs newest first: `{ id, sessionId, kitName, version, projectPath, outcome, correctionCount, testsPassed, testsFailed }` — **no transcript field of any kind** |
 | `GET /api/feedback?kit=&status=` | `[{ id, runIds, kitName, kind, text, quote, rating, tags, status, mergedIntoId, resolvedInVersion }]` |
 | `GET /api/proposals?kit=&status=` / `GET /api/proposals/:id` | proposal with `hunks[]`, `droppedCount`, `status`, `baseVersion` |
+| `GET /api/kits/:name/insights` | latest analysis `{ id, version, createdAt, feedbackCount, themes[], newFeedbackCount, stale }` or `null` |
+| `GET /api/feedback/count` | `{ open }`: the nav badge count |
 | `GET /api/kits/:name/metrics` | `[{ version, runs, successRate, correctionsPerRun }]` newest version first |
 
 `contentHash` = sha256 hex over the version's files sorted by path, each as `path\n` + content + `\n`. The CLI writes the same value into `.kitforge.json`.
@@ -152,8 +156,8 @@ Mock calls wait 300 ms before resolving so loading states are observable (`propo
 
 | testid | Element |
 |---|---|
-| `nav-library` / `nav-inbox` | Top nav links |
-| `inbox-count` | Badge on `nav-inbox`: number of `new` items; hidden when 0 |
+| `nav-library` / `nav-inbox` | Top nav links (`nav-inbox` is labelled "Feedback") |
+| `inbox-count` | Badge on `nav-inbox`: number of open items; hidden when 0; refetched on every route change and feedback change |
 | `library-empty` | Empty state, text `No kits yet` |
 | `import-button` | Opens import dialog |
 | `import-file` | File input (zip) |
@@ -179,17 +183,21 @@ Mock calls wait 300 ms before resolving so loading states are observable (`propo
 | `metrics-row` | One per version; `data-version` |
 | `metric-runs` / `metric-success` / `metric-corrections` | `1`, `50%` (`—` when 0 runs), `2.0` |
 | `compare-link` / `compare-a` / `compare-b` | Compare page and its two columns |
-| `improve-count` | Text `N accepted` |
-| `improve-button` | Disabled when 0 accepted |
+| `improve-count` | Text `N themes` / `1 theme` from the latest insights |
+| `improve-button` | Disabled when the latest insights have 0 themes (or none exist) |
+| `tab-insights` | Kit detail tab |
+| `analyze-button` / `insights-loading` / `insights-error` / `insights-stale` | Analyze control, its loading state, `Couldn't analyze feedback. Nothing was changed.`, and the out-of-date note (`N new feedback item(s) since this analysis.` or `The kit has a newer version than this analysis.`) |
+| `insight-theme` | One per theme, ranked |
+| `insight-title` / `insight-priority` / `insight-suggestion` / `insight-evidence` / `insight-feedback-link` | Theme fields; evidence `N feedback item(s): #…`; links carry `data-feedback-id` |
 | `improve-instruction` / `improve-submit` | Dialog inputs |
 | `proposal-loading` | Visible while generating |
 | `proposal-error` | Error text, e.g. `Couldn't generate a proposal. Nothing was changed.` |
-| `inbox-tab-new` / `inbox-tab-accepted` / `inbox-tab-resolved` | Inbox tabs |
+| `inbox-tab-new` / `inbox-tab-resolved` / `inbox-tab-dismissed` | Feedback tabs: Open, Resolved, Dismissed (no Accepted tab since 2026-09-25) |
 | `inbox-filter-kit` | Kit filter select (`all` + kit names) |
-| `inbox-empty` | Text `Nothing to triage` |
+| `inbox-empty` | Open tab: `No open feedback`; Resolved: `Nothing resolved yet`; Dismissed: `Nothing dismissed` |
 | `inbox-item` | One per item; `data-feedback-id`, `data-status`, `data-focused="true"` when keyboard-focused |
 | `feedback-text` / `feedback-quote` / `feedback-kit` / `feedback-rating` / `feedback-runs` / `feedback-status` | Item fields; rating `4/5`; runs `2 runs`; status e.g. `Resolved in 1.1.0` |
-| `feedback-accept` / `feedback-dismiss` | Triage actions |
+| `feedback-dismiss` / `feedback-restore` | Dismiss (Open tab) and Restore (Dismissed tab). There is no `feedback-accept` |
 | `feedback-tag-input` / `feedback-tag` | Tag entry (Enter adds) and each tag chip |
 | `inbox-select` / `merge-button` | Per-item checkbox and merge action |
 | `proposal-hunk` | One per hunk; `data-hunk-id`, `data-file`, `data-decision` |
@@ -252,22 +260,22 @@ Each scenario starts from a reset DB and a fresh `tmpHome()`. Shorthand:
 
 ### Stage 4 — Inbox
 
-**E2E-14 @stage4 triage (T1, T2, U6).** After E2E-10's setup, `inbox-count` = `2`. Open `nav-inbox`: `inbox-tab-new` shows 2 `inbox-item`s, each with `feedback-kit` `debug-kit` and its X1 `feedback-quote`. Click `feedback-accept` on F1 and `feedback-dismiss` on F2. `inbox-empty` = `Nothing to triage`; `inbox-count` is hidden. `inbox-tab-accepted` shows only F1. Reload: the same holds. `/kits/debug-kit` shows `improve-count` = `1 accepted`.
+**E2E-14 @stage4 feedback feed (T1, T2, U6).** *(Rewritten 2026-09-25: no triage.)* After E2E-10's setup, `inbox-count` = `2`. Open `nav-inbox`: `inbox-tab-new` shows 2 `inbox-item`s, each with `feedback-kit` `debug-kit` and its X1 `feedback-quote`; there is no `feedback-accept`. Dismiss F2: it leaves the list, `inbox-count` = `1`, and after a reload only F1 is open. `inbox-tab-dismissed` shows F2; `feedback-restore` returns it (`inbox-empty` = `Nothing dismissed`), the Open tab shows 2 items again and `inbox-count` = `2`.
 
 **E2E-15 @stage4 filter and tags (T1, T2).** Import both kits, pull both, report partial (`sess-001`) and `transcript-feature.jsonl` (`sess-004`). Inbox shows 3 items. Set `inbox-filter-kit` to `new-feature-kit`: 1 item, text `Edited the module without reading it first`. Set it to `all`, type `testing` in F1's `feedback-tag-input` and press Enter: a `feedback-tag` `testing` appears and is still there after reload.
 
 **E2E-16 @stage4 manual note and outcome override (L5, R5, U5).** After E2E-10's setup, `runKit(['note','Good root-cause analysis','--rating','4'])`: exit 0, stdout matches `/^Added note to run #\d+$/m`. The inbox shows a third item with `feedback-text` `Good root-cause analysis` and `feedback-rating` `4/5`. On `tab-runs`, set `run-outcome-select` to `success`: after reload `run-outcome` = `success` and the library card shows `100%`. In a fresh home with an empty DB, `runKit(['note','x'])` exits 1 with stderr `No runs yet`.
 
-**E2E-17 @stage4 keyboard triage (Accessibility).** After E2E-10's setup, open the inbox and press `j`: the first item has `data-focused="true"`. Press `a`: that item disappears from New and appears under Accepted. Press `j` then `d`: the New tab shows `inbox-empty`.
+**E2E-17 @stage4 keyboard dismiss (Accessibility).** *(Rewritten 2026-09-25: `a` removed.)* After E2E-10's setup, open the inbox and press `j`: the first item has `data-focused="true"`. Press `d`: it leaves the Open tab. Press `j` then `d`: the Open tab shows `inbox-empty` = `No open feedback`, and `inbox-tab-dismissed` shows both items.
 
 ### Stage 5 — Improve and publish
 
-**E2E-18 @stage5 proposal from accepted feedback (I1, I2, U7).** After E2E-10's setup, accept F1 and F2. On `/kits/debug-kit`, `improve-count` = `2 accepted`. Click `improve-button`, then `improve-submit`: `proposal-loading` is visible, then the URL matches `/kits/debug-kit/proposals/\d+`. Two `proposal-hunk`s: `data-file="SKILL.md"` and `data-file="references/checklist.md"`. The SKILL.md hunk's `hunk-removed` contains `1. Reproduce the bug with a failing test before changing code.` and its `hunk-added` contains `Never write the fix first.`. Each hunk has a non-empty `hunk-rationale`; the SKILL.md hunk's `hunk-feedback-link` has `data-feedback-id` = F1, the checklist hunk's has F2. `publish-button` is disabled. Accept one hunk: still disabled. Accept the other: enabled.
+**E2E-18 @stage5 proposal from the kit's insights (A1, I1, I2, U7).** *(Changed 2026-09-25.)* After E2E-10's setup, `/kits/debug-kit` shows `improve-count` = `0 themes` and `improve-button` disabled. On `tab-insights` click `analyze-button`; `improve-count` = `2 themes`. Click `improve-button`, then `improve-submit`: `proposal-loading` is visible, then the URL matches `/kits/debug-kit/proposals/\d+`. Two `proposal-hunk`s: `data-file="SKILL.md"` and `data-file="references/checklist.md"`. The SKILL.md hunk's `hunk-removed` contains `1. Reproduce the bug with a failing test before changing code.` and its `hunk-added` contains `Never write the fix first.`. Each hunk has a non-empty `hunk-rationale`; the SKILL.md hunk's `hunk-feedback-link` has `data-feedback-id` = F1, the checklist hunk's has F2. `publish-button` is disabled. Accept one hunk: still disabled. Accept the other: enabled.
 
 **E2E-19 @stage5 ★ THE CORE LOOP: feedback becomes a better installed kit (I3, I4, M1, L1, L4, U8, U9, U10).** This is the most important test in the suite. It proves KitForge's promise end to end: a correction captured from a real session changes the kit that Claude Code installs next, and the metrics show the difference.
 
 1. Import debug-kit; pull; report partial as `sess-001`.
-2. Accept F1 and F2; Improve; accept both hunks; leave `bump-select` at `minor`; click `publish-button`.
+2. Analyze (Insights tab); Improve; accept both hunks; leave `bump-select` at `minor`; click `publish-button`.
 3. Redirected to `/kits/debug-kit`: `kit-current-version` = `1.1.0`; `file-viewer` (SKILL.md) contains `Never write the fix first.`
 4. `tab-versions`: two `version-row`s; `1.1.0` has `data-current="true"`; under it, two `changelog-entry`s whose `changelog-feedback-link`s carry F1 and F2.
 5. `inbox-tab-resolved` shows F1 and F2, each with `feedback-status` = `Resolved in 1.1.0`.
@@ -276,11 +284,11 @@ Each scenario starts from a reset DB and a fresh `tmpHome()`. Shorthand:
 8. Report `transcript-debug-success.jsonl` as `sess-002`: the new `run-row` has `run-version` = `1.1.0` and `run-outcome` = `success`.
 9. `tab-metrics`: `metrics-row[data-version="1.0.0"]` shows runs `1`, success `0%`, corrections `2.0`; `metrics-row[data-version="1.1.0"]` shows runs `1`, success `100%`, corrections `0.0`.
 
-**E2E-20 @stage5 partial accept and patch bump (I2, I3, I4).** Setup as E2E-18 with both hunks shown. Accept the SKILL.md hunk, reject the checklist hunk, set `bump-select` to `patch`, publish: current is `1.0.1`; its `references/checklist.md` equals the fixture; F1 shows `Resolved in 1.0.1`; F2 is back under `inbox-tab-accepted`, and `improve-count` = `1 accepted`.
+**E2E-20 @stage5 partial accept and patch bump (I2, I3, I4).** Setup as E2E-18 with both hunks shown. Accept the SKILL.md hunk, reject the checklist hunk, set `bump-select` to `patch`, publish: current is `1.0.1`; its `references/checklist.md` equals the fixture; F1 shows `Resolved in 1.0.1`; F2 is still open (`inbox-tab-new`, status `new`), and the Insights tab shows `insights-stale` mentioning the newer version.
 
-**E2E-21 @stage5 unusable edits are dropped (I1 rule).** Setup: F1 and F2 accepted. Improve with `improve-instruction` = `MOCK:bad-hunk`: exactly one `proposal-hunk`; `proposal-dropped` = `1 suggested change couldn't be applied and was dropped`.
+**E2E-21 @stage5 unusable edits are dropped (I1 rule).** Setup: E2E-10, then Analyze. Improve with `improve-instruction` = `MOCK:bad-hunk`: exactly one `proposal-hunk`; `proposal-dropped` = `1 suggested change couldn't be applied and was dropped`.
 
-**E2E-22 @stage5 proposal failure is atomic (I1, Reliability).** Setup: F1 and F2 accepted. Improve with instruction `MOCK:proposal-fail`: `proposal-error` = `Couldn't generate a proposal. Nothing was changed.`; the URL is still `/kits/debug-kit`; `GET /api/proposals?kit=debug-kit&status=draft` returns `[]`; current version is `1.0.0`; F1 and F2 are still `accepted`.
+**E2E-22 @stage5 proposal failure is atomic (I1, Reliability).** Setup: E2E-10, then Analyze. Improve with instruction `MOCK:proposal-fail`: `proposal-error` = `Couldn't generate a proposal. Nothing was changed.`; the URL is still `/kits/debug-kit`; `GET /api/proposals?kit=debug-kit&status=draft` returns `[]`; current version is `1.0.0`; F1 and F2 are still `new`.
 
 ### Stage 6 — Polish (P1)
 
@@ -308,13 +316,17 @@ The SessionEnd hook is dormant; runs are reported by the kit's own final step (P
 
 **E2E-32 @stage7 kits carry the reporting step, and it works as written (L1, L7).** Import debug-kit. Click `export-button`: the download is `debug-kit-1.0.0.zip` with exactly `debug-kit/SKILL.md` and `debug-kit/references/checklist.md`; SKILL.md starts with the fixture content and contains `## Final step: report this session to KitForge` and `"version": "1.0.0"`; the checklist equals the fixture; the kit still has one version. `runKit(['pull','debug-kit','--report'])` installs a SKILL.md identical to the exported one, and `.kitforge.json` `hash` equals the stored `contentHash`. Taking the URL and JSON template from the installed step, filling the placeholders and POSTing it creates a run (version 1.0.0, success, 1 correction). A plain `pull` afterwards installs SKILL.md byte-identical to the fixture again.
 
-### Smoke — real Claude API (manual only)
+### Stage 8 — Insights (added 2026-09-25)
 
-Skipped unless `RUN_SMOKE=1`, `KITFORGE_LLM_MODE=real` and `ANTHROPIC_API_KEY` are set. `/api/test/reset` is unavailable, so smoke specs use a temporary `KITFORGE_DB_PATH` and start their own server. Assertions are loose.
+**E2E-33 @stage8 insights: all feedback from every run becomes ranked themes that drive Improve (A1, A2, A3, I1, I4).** Import, pull, report partial (`sess-001`) and `transcript-debug-dup.jsonl` (`sess-003`), then `kit note "Good root-cause analysis" --rating 4`: 4 items. On `tab-insights`, `improve-button` is disabled; click `analyze-button`: `insights-loading` shows, then 3 `insight-theme`s, no `insights-stale`, `improve-count` = `3 themes`. The first theme is `high`, titled `Wrote the fix before writing a failing test`, with feedback links `[F1, X3]` and evidence `2 feedback items`. `GET /api/kits/debug-kit/insights` has `feedbackCount: 4`, 3 themes, `stale: false`. Reporting the success transcript (`sess-002`, no corrections) leaves it fresh; a self-report whose correction text is `MOCK:analyze-fail` makes `insights-stale` read `1 new feedback item since this analysis.` Analyze now shows `insights-error` = `Couldn't analyze feedback. Nothing was changed.` and still lists 3 themes. Dismiss that item, Analyze again (fresh), Improve: the SKILL.md hunk's feedback links are `[F1, X3]`. Accept both hunks and publish: 1.1.0; F1, F2 and X3 are `resolved` in 1.1.0 and the note is still `new`.
+
+### Smoke — real LLM via OpenRouter (manual only)
+
+Skipped unless `RUN_SMOKE=1`, `KITFORGE_LLM_MODE=real`, `OPENROUTER_API_KEY` and `KITFORGE_MODEL` are set. `/api/test/reset` is unavailable, so smoke specs use a temporary `KITFORGE_DB_PATH` and start their own server. Assertions are loose.
 
 **SMOKE-1 @smoke extraction.** Import debug-kit, pull, report `transcript-real-smoke.jsonl`. Within 60 s a run exists with at least 1 correction whose `text` matches `/test/i`; every `quote` is under 300 characters.
 
-**SMOKE-2 @smoke proposal.** Accept all feedback, Improve. Within 90 s at least one `proposal-hunk` appears, and at least one has `data-file="SKILL.md"`.
+**SMOKE-2 @smoke analysis and proposal.** Analyze: within 120 s at least one `insight-theme` with at least one feedback link. Improve: within 90 s at least one `proposal-hunk` appears, and at least one has `data-file="SKILL.md"`.
 
 **SMOKE-3 @smoke publish.** Accept all hunks and publish: `1.1.0` exists and its SKILL.md differs from `1.0.0`'s.
 

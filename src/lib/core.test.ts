@@ -8,13 +8,15 @@ import { applyHunks, editsToHunks, HunkConflictError } from "./kits/hunks";
 import { KitImportError, kitFromEntries } from "./kits/parse";
 import { REPORT_END, REPORT_START, withReportingStep } from "./kits/reporting";
 import { bumpSemver, compareSemver, nextVersion } from "./kits/semver";
-import { mockExtraction, mockProposal } from "./llm/mock";
-import { extractionSchema, proposalSchema } from "./llm/schemas";
+import { mockExtraction, mockInsights, mockProposal } from "./llm/mock";
+import { parseToolOutput } from "./llm/openrouter";
+import { extractionSchema, insightsSchema, proposalSchema, type Theme } from "./llm/schemas";
 import { aggregateMetrics, formatCorrections, formatPercent } from "./metrics";
 import { detectKits, parseTranscript, sessionTimes, TRANSCRIPT_MAX, trimTranscript } from "./runs/transcript";
 
 const SKILL = fs.readFileSync(path.join("e2e", "fixtures", "debug-kit", "SKILL.md"), "utf8");
 const CHECKLIST = fs.readFileSync(path.join("e2e", "fixtures", "debug-kit", "references", "checklist.md"), "utf8");
+const theme = (ids: number[]): Theme => ({ title: "t", problem: "p", suggestion: "s", priority: "high", feedback_ids: ids });
 const FILES = [
   { path: "SKILL.md", content: SKILL },
   { path: "references/checklist.md", content: CHECKLIST },
@@ -117,7 +119,7 @@ describe("semver", () => {
 
 describe("editsToHunks", () => {
   it("keeps edits whose find occurs exactly once and drops the rest", () => {
-    const { hunks, dropped } = editsToHunks(FILES, mockProposal({ files: FILES, feedback: [{ id: 1, text: "a", quote: null }], instruction: "MOCK:bad-hunk" }).edits);
+    const { hunks, dropped } = editsToHunks(FILES, mockProposal({ files: FILES, themes: [theme([1])], instruction: "MOCK:bad-hunk" }).edits);
     expect(hunks).toHaveLength(1);
     expect(dropped).toBe(1);
     expect(hunks[0].filePath).toBe("SKILL.md");
@@ -190,7 +192,7 @@ describe("LLM output schemas", () => {
       expect(extractionSchema.safeParse(mockExtraction(`MOCK:${marker}`)).success).toBe(true);
     }
     for (const instruction of [undefined, "shorter", "MOCK:bad-hunk"]) {
-      expect(proposalSchema.safeParse(mockProposal({ files: FILES, feedback: [{ id: 1, text: "a", quote: null }], instruction })).success).toBe(true);
+      expect(proposalSchema.safeParse(mockProposal({ files: FILES, themes: [theme([1])], instruction })).success).toBe(true);
     }
   });
 
@@ -206,8 +208,8 @@ describe("LLM output schemas", () => {
   it("mock scripts follow the contract", () => {
     expect(() => mockExtraction("MOCK:extract-fail")).toThrow();
     expect(mockExtraction("no marker")).toEqual({ outcome: "success", corrections: [], tests: null });
-    expect(() => mockProposal({ files: FILES, feedback: [], instruction: "MOCK:proposal-fail" })).toThrow();
-    const p1 = mockProposal({ files: FILES, feedback: [{ id: 7, text: "b", quote: null }, { id: 3, text: "a", quote: null }] });
+    expect(() => mockProposal({ files: FILES, themes: [], instruction: "MOCK:proposal-fail" })).toThrow();
+    const p1 = mockProposal({ files: FILES, themes: [theme([7]), theme([3])] });
     expect(p1.edits.map((e) => e.feedback_ids)).toEqual([[3], [7]]);
   });
 });
@@ -247,5 +249,55 @@ describe("withReportingStep", () => {
     expect(skill.split(REPORT_END)).toHaveLength(2);
     expect(skill).not.toContain('"version": "1.0.0"');
     expect(skill).toBe(withReportingStep(FILES, target).find((f) => f.path === "SKILL.md")!.content);
+  });
+});
+
+describe("insights", () => {
+  const item = (id: number, text: string, status = "new") => ({ id, kind: "correction", text, quote: `q${id}`, rating: null, status, runCount: 1, resolvedInVersion: null });
+
+  it("mock groups open items that start with the same three words and skips resolved ones", () => {
+    const out = mockInsights({
+      kit: "k",
+      version: "1.0.0",
+      files: FILES,
+      feedback: [
+        item(3, "Wrote the fix before the failing test again"),
+        item(1, "Wrote the fix before writing a failing test"),
+        item(2, "Ran the full test suite"),
+        item(4, "Old problem", "resolved"),
+      ],
+    });
+    expect(out.themes.map((t) => t.feedback_ids)).toEqual([[1, 3], [2]]);
+    expect(out.themes.map((t) => t.priority)).toEqual(["high", "medium"]);
+    expect(insightsSchema.safeParse(out).success).toBe(true);
+  });
+
+  it("mock fails on MOCK:analyze-fail", () => {
+    expect(() => mockInsights({ kit: "k", version: "1", files: FILES, feedback: [item(1, "MOCK:analyze-fail")] })).toThrow();
+  });
+
+  it("schema rejects malformed insights", () => {
+    expect(insightsSchema.safeParse({ themes: [{ title: "t", problem: "p", suggestion: "s", priority: "urgent", feedback_ids: [1] }] }).success).toBe(false);
+    expect(insightsSchema.safeParse({ themes: [{ title: "t", problem: "p", suggestion: "s", priority: "high", feedback_ids: [] }] }).success).toBe(false);
+    expect(insightsSchema.safeParse({ summary: "x" }).success).toBe(false);
+  });
+});
+
+describe("parseToolOutput (OpenRouter responses)", () => {
+  const args = { themes: [] };
+  it("reads the tool call arguments", () => {
+    const res = { choices: [{ message: { tool_calls: [{ function: { name: "record_insights", arguments: JSON.stringify(args) } }] } }] };
+    expect(parseToolOutput(res, "record_insights")).toEqual(args);
+  });
+
+  it("falls back to JSON in the message text, fenced or bare", () => {
+    const fenced = ["Here:", "```json", '{"themes": []}', "```"].join("\n");
+    expect(parseToolOutput({ choices: [{ message: { content: fenced } }] }, "x")).toEqual(args);
+    expect(parseToolOutput({ choices: [{ message: { content: 'Sure. {"themes": []} Done.' } }] }, "x")).toEqual(args);
+  });
+
+  it("throws when there is nothing to parse", () => {
+    expect(() => parseToolOutput({ choices: [{ message: { content: "" } }] }, "x")).toThrow();
+    expect(() => parseToolOutput({}, "x")).toThrow();
   });
 });

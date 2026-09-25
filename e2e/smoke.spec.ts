@@ -8,15 +8,18 @@ import { detectKits, parseTranscript } from "../src/lib/runs/transcript";
 import { TRANSCRIPTS, writeTranscript } from "./helpers/transcript";
 import { fixtureZip } from "./helpers/zip";
 
-// Real Claude API. Skipped unless RUN_SMOKE=1, KITFORGE_LLM_MODE=real and ANTHROPIC_API_KEY are set.
+// Real LLM through OpenRouter. Skipped unless RUN_SMOKE=1, KITFORGE_LLM_MODE=real, OPENROUTER_API_KEY and KITFORGE_MODEL are set.
 // /api/test/reset is unavailable in real mode, so this suite starts its own server on a temp DB.
 const enabled =
-  process.env.RUN_SMOKE === "1" && process.env.KITFORGE_LLM_MODE === "real" && !!process.env.ANTHROPIC_API_KEY;
+  process.env.RUN_SMOKE === "1" &&
+  process.env.KITFORGE_LLM_MODE === "real" &&
+  !!process.env.OPENROUTER_API_KEY &&
+  !!process.env.KITFORGE_MODEL;
 const PORT = "4318";
 const URL = `http://127.0.0.1:${PORT}`;
 
 test.describe.configure({ mode: "serial" });
-test.skip(!enabled, "Set RUN_SMOKE=1, KITFORGE_LLM_MODE=real and ANTHROPIC_API_KEY to run the smoke suite");
+test.skip(!enabled, "Set RUN_SMOKE=1, KITFORGE_LLM_MODE=real, OPENROUTER_API_KEY and KITFORGE_MODEL to run the smoke suite");
 
 let server: ChildProcess | undefined;
 const home = tmpHome();
@@ -72,10 +75,14 @@ test("SMOKE-1 @smoke extraction", async ({ page, request }) => {
   for (const f of feedback) expect(f.quote.length).toBeLessThan(300);
 });
 
-test("SMOKE-2 @smoke proposal", async ({ page, request }) => {
-  test.setTimeout(150_000);
-  const feedback = (await (await request.get(`${URL}/api/feedback?kit=debug-kit&status=new`)).json()) as { id: number }[];
-  for (const f of feedback) await request.patch(`${URL}/api/feedback/${f.id}`, { data: { status: "accepted" } });
+test("SMOKE-2 @smoke analysis and proposal", async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.goto(`${URL}/kits/debug-kit?tab=insights`);
+  await page.getByTestId("analyze-button").click();
+  await expect(page.getByTestId("insight-theme").first()).toBeVisible({ timeout: 120_000 });
+  const themes = await page.getByTestId("insight-theme").count();
+  expect(themes).toBeGreaterThanOrEqual(1);
+  expect(await page.getByTestId("insight-feedback-link").count()).toBeGreaterThanOrEqual(1);
 
   await page.goto(`${URL}/kits/debug-kit`);
   await page.getByTestId("improve-button").click();

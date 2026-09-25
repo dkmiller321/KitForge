@@ -34,7 +34,7 @@ export default async function ProposalPage({ params }: { params: Promise<{ name:
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight">Proposal #{proposal.id}</h1>
         <p className="text-sm text-muted-foreground">
-          Against <span className="font-mono">{proposal.baseVersion}</span> · from feedback{" "}
+          Against <span className="font-mono">{proposal.baseVersion}</span> · from the latest insights, covering feedback{" "}
           {proposal.feedbackIds.map((f) => `#${f}`).join(", ")}
           {proposal.instruction ? ` · “${proposal.instruction}”` : ""} · size {sizeDelta >= 0 ? "+" : ""}
           {sizeDelta} chars on {sizeBefore}
@@ -44,7 +44,6 @@ export default async function ProposalPage({ params }: { params: Promise<{ name:
         kit={name}
         proposalId={proposal.id}
         status={proposal.status}
-        feedbackIds={proposal.feedbackIds}
         droppedCount={proposal.droppedCount}
         hunks={hunks}
       />

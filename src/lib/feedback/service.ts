@@ -30,7 +30,7 @@ export function countNewFeedback(): number {
   const row = getDb()
     .select({ n: sql<number>`count(*)` })
     .from(feedback)
-    .where(eq(feedback.status, "new"))
+    .where(inArray(feedback.status, ["new", "accepted"]))
     .get();
   return row?.n ?? 0;
 }

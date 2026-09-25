@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
-export function ImproveButton({ kit, accepted }: { kit: string; accepted: number }) {
+export function ImproveButton({ kit, themes, stale }: { kit: string; themes: number; stale: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState("");
@@ -41,7 +41,11 @@ export function ImproveButton({ kit, accepted }: { kit: string; accepted: number
       }}
     >
       <DialogTrigger asChild>
-        <Button data-testid="improve-button" disabled={accepted === 0}>
+        <Button
+          data-testid="improve-button"
+          disabled={themes === 0}
+          title={themes === 0 ? "Analyze the kit's feedback first (Insights tab)" : undefined}
+        >
           Improve
         </Button>
       </DialogTrigger>
@@ -49,8 +53,9 @@ export function ImproveButton({ kit, accepted }: { kit: string; accepted: number
         <DialogHeader>
           <DialogTitle>Improve {kit}</DialogTitle>
           <DialogDescription>
-            Claude proposes edits from the {accepted} accepted feedback item{accepted === 1 ? "" : "s"}. You review every change before anything is
-            published.
+            Claude proposes edits that address the {themes} theme{themes === 1 ? "" : "s"} from the latest analysis. You review every change before
+            anything is published.
+            {stale && " That analysis is out of date (newer feedback or a newer version); analyze again first to include it."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
