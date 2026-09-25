@@ -190,9 +190,29 @@ Fixes from the walkthrough: the compare-page selects, diff selects and edit dial
    (Any current model id works; a smaller model lowers the per-run cost.) The DB stays at `~/.kitforge/kitforge.db`.
 3. Start the app: `npm run build` then `npm start` (or `npm run dev`). Open http://127.0.0.1:4317.
 4. Put the CLI on your PATH: `npm link`, then check with `kit --help`.
-5. Install the Claude Code hook: `kit hook install` (adds `SessionEnd → kit report` to `~/.claude/settings.json`, keeping your other settings).
-6. Import your three kits. Back up `~/.claude/skills` first, because `kit pull` replaces each kit folder with the stored copy:
-   - In the UI: Import kit → paste the absolute folder path (for example `C:\Users\you\.claude\skills\debug-kit`) → Import. Repeat for each kit.
-   - Or from a shell: `curl -F "path=C:\Users\you\.claude\skills\debug-kit" http://127.0.0.1:4317/api/kits/import`
-   - Then run `kit pull <name>` once per kit so each folder gets its `.kitforge.json` manifest. **Runs are only reported for kits that have that manifest.** Check with `kit list`.
+5. (Replaced 2026-09-25, see Stage 7 below.) Don't install the SessionEnd hook; kits report themselves.
+6. Import your kits, then give each one the reporting step:
+   - Import: in the UI, Import kit → absolute folder path (for example `C:\Users\you\.claude\skills\synced\<id>\idea-to-build-kit`) → Import. Importing only reads the folder.
+   - For a kit Claude syncs for you (like Idea-to-Build Kit): open it in KitForge → **Download for Claude** → upload that zip to Claude as the skill, replacing the current one. Every session that uses it then ends by reporting to KitForge.
+   - For a kit you keep in `~/.claude/skills/<name>/`: back up the folder, then run `kit pull <name> --report`.
+   - Repeat after every new version you publish, so the step carries the right version number.
 7. Optional, with the key set: `RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep @smoke`, and `KITFORGE_SMOKE_TRANSCRIPT=<a real ~/.claude/projects/…/*.jsonl that read a kit> RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep SMOKE-4`.
+
+## Stage 7 — Self-reporting (2026-09-25, user-requested change)
+
+The user asked for kits to report themselves at the end of each Claude Code session instead of the SessionEnd hook, and to drop the hook for now. See DECISIONS #22–26, the PRD change log (L7) and E2E-31/32.
+
+Commands:
+
+- `npx tsc --noEmit`: clean. `npx eslint src e2e`: clean.
+- `npm test`: 39 passed (5 new: the reporting step appends to SKILL.md only, replaces an earlier copy, and self-reports store/dedupe/reject correctly).
+- `npx playwright test --grep @stage7 --retries=0`: 2 passed (E2E-31, E2E-32).
+- `npx playwright test` (all non-smoke): 33 passed, 0 failed.
+
+Walkthrough:
+
+- Real-world command check (Git Bash, production build on a scratch DB): `kit pull debug-kit --report` installed SKILL.md ending with the reporting section. I took the ```bash block from that file, filled the placeholders and ran it with `bash`, heredoc included. KitForge replied `{"created":true,"runId":1,"message":"Reported to KitForge: run #1, 1 correction(s)"}` and the run appears in `/api/runs` with the project path, outcome and correction.
+- MCP (`playwright-headless`): the kit header shows **Download for Claude**; its link returns 200 `application/zip`, `attachment; filename="debug-kit-1.0.0.zip"`. The Runs tab shows the self-reported run (#1, 1.0.0, partial, 1 correction).
+- E2E-31: pass. E2E-32: pass (as specs; E2E-32 also runs the step's JSON template as written).
+
+Not verified: a real Claude Code session following the step on its own (that needs a live session using a kit with the step), and the upload of the zip to Claude as a skill.
