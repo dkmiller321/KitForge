@@ -186,7 +186,7 @@ function InboxItem({
               {item.status === "resolved" && item.resolvedInVersion ? `Resolved in ${item.resolvedInVersion}` : item.status}
             </span>
           </div>
-          <p data-testid="feedback-text" className="font-medium">
+          <p data-testid="feedback-text" className="font-medium whitespace-pre-line">
             {item.text}
           </p>
           {item.quote && (
