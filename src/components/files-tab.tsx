@@ -43,10 +43,11 @@ export function FilesTab({ versions, selectedVersion, files, rendered }: Props) 
                 type="button"
                 data-testid="file-tree-item"
                 data-path={f.path}
+                title={f.path}
                 aria-current={f.path === selected}
                 onClick={() => setSelected(f.path)}
                 className={cn(
-                  "w-full truncate rounded-md px-2 py-1 text-left font-mono text-xs",
+                  "w-full rounded-md px-2 py-1 text-left font-mono text-xs break-all",
                   f.path === selected ? "bg-forge-soft font-semibold" : "text-muted-foreground hover:bg-muted",
                 )}
               >

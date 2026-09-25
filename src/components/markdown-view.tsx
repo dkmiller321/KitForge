@@ -1,6 +1,14 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+/** Unwraps a YAML scalar: 'single' (with '' escapes) or "double" quoted. */
+function yamlScalar(raw: string): string {
+  const v = raw.trim();
+  if (v.length >= 2 && v.startsWith("'") && v.endsWith("'")) return v.slice(1, -1).replace(/''/g, "'");
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1).replace(/\\"/g, '"');
+  return v;
+}
+
 function splitFrontmatter(content: string): { meta: [string, string][]; body: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
   if (!m) return { meta: [], body: content };
@@ -8,7 +16,7 @@ function splitFrontmatter(content: string): { meta: [string, string][]; body: st
     .split(/\r?\n/)
     .map((line) => /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line))
     .filter((x): x is RegExpExecArray => x !== null)
-    .map((x) => [x[1], x[2]] as [string, string]);
+    .map((x) => [x[1], yamlScalar(x[2])] as [string, string]);
   return { meta, body: content.slice(m[0].length) };
 }
 
@@ -24,7 +32,7 @@ export function MarkdownView({ path, content }: { path: string; content: string 
           {meta.map(([k, v]) => (
             <div key={k} className="contents">
               <dt className="text-muted-foreground">{k}</dt>
-              <dd>{v}</dd>
+              <dd className="whitespace-pre-wrap">{v}</dd>
             </div>
           ))}
         </dl>
