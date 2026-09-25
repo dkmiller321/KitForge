@@ -89,3 +89,30 @@ Bugs found and fixed:
 
 1. **E2E-15 (spec):** the tag chip was shown before the PATCH finished, so an immediate reload could lose the tag. The chip is now added only after the save succeeds.
 2. **E2E-16 (MCP walkthrough only; the spec passed):** changing `run-outcome-select` and navigating away within about 300 ms aborted the PATCH, so the override was lost. Triage and outcome mutations now use `fetch(..., { keepalive: true })`, so the save completes even when the page unloads. Re-checked: the value persists; the next render can show the old value if it lands before the save commits, and it is correct on the following render.
+
+## Stage 5 — Improve and publish (2026-09-25)
+
+Commands:
+
+- `npm run typecheck`: clean. `npx eslint src e2e`: clean. `npm test`: 23 passed.
+- `npx playwright test --grep "@stage5" --retries=0`: first run 3 passed, 2 failed (E2E-19, E2E-20 timed out on a disabled Improve button; cause below).
+- After the fix: `npx playwright test --grep "@stage[45]" --retries=0`: 9 passed. `npx playwright test --grep "@stage[0-5]"`: 23 passed, 0 failed.
+
+MCP walkthrough (`playwright-headless` + CLI with a temp HOME, mock server on `.data/mcp.db`):
+
+- **E2E-19 ★ core loop: pass, every step.**
+  1. Import, pull, report partial sess-001: `Reported 1 run(s)`.
+  2. Accepted #1 and #2 in the inbox UI. The kit page shows `2 accepted`. Improve → Generate went to `/kits/debug-kit/proposals/1` with two hunks (SKILL.md: `-1. Reproduce … before changing code.` / `+… Never write the fix first.`, rationale linked to #1; checklist: `+- [ ] Only the failing test run while iterating`, linked to #2). Publish stayed disabled after one accept and was enabled after both; bump defaulted to `minor`. Published.
+  3. Redirected to `/kits/debug-kit`: `kit-current-version` 1.1.0, `pull-command` `kit pull debug-kit@1.1.0`, and the viewer contains "Never write the fix first."
+  4. Versions: 1.1.0 (`data-current="true"`) has two changelog entries linking #1 and #2; 1.0.0 still has "Imported".
+  5. Inbox → Resolved: #1 and #2 both read "Resolved in 1.1.0".
+  6. `/api/kits/debug-kit/files?version=1.0.0` is byte-identical to the fixtures (checked in node), and its contentHash is unchanged (`ec0f1d…`).
+  7. `kit pull debug-kit` prints `Installed debug-kit@1.1.0 to …`; SKILL.md on disk contains the new rule; `.kitforge.json` version is 1.1.0; `kit list` prints `debug-kit 1.1.0 (latest 1.1.0)`.
+  8. The success transcript as sess-002 printed `Reported 1 run(s)`; run #2 shows version 1.1.0, outcome success.
+  9. Metrics: 1.0.0 → 1 / 0% / 2.0; 1.1.0 → 1 / 100% / 0.0.
+- E2E-18: pass. Hunk files, removed and added text, rationale, feedback links (#1 on SKILL.md, #2 on the checklist) and publish gating were all observed in step 2 above; `proposal-loading` was seen 100 ms after submit (in the E2E-22 walk).
+- E2E-20: pass. Accept SKILL.md, reject the checklist, bump `patch`, publish: current is 1.0.1; the 1.0.1 checklist equals the fixture; #1 is resolved in 1.0.1; #2 is still accepted; `1 accepted`. The earlier bad-hunk draft became `discarded` (one active draft per kit).
+- E2E-21: pass. `MOCK:bad-hunk` gives one hunk and "1 suggested change couldn't be applied and was dropped".
+- E2E-22: pass. `MOCK:proposal-fail` shows `proposal-loading`, then "Couldn't generate a proposal. Nothing was changed."; URL stays `/kits/debug-kit`; no drafts; current 1.0.0; #1 and #2 still accepted.
+
+Bug found and fixed: the inbox removed an item before its PATCH had committed (optimistic UI), so an immediate navigation could render a stale state (the Improve button disabled with 0 accepted). Accept, dismiss and merge now remove items only after the server confirms the change.

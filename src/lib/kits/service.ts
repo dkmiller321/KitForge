@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { feedback, kitVersions, kits, runs, versionFiles } from "@/db/schema";
-import { successRate } from "@/lib/metrics";
+import { aggregateMetrics, successRate, type VersionMetrics } from "@/lib/metrics";
+import { listRuns } from "@/lib/runs/service";
 import { contentHash, sortFiles, type FileEntry } from "./hash";
 import type { ParsedKit } from "./parse";
 import { compareSemver, nextVersion, type Bump } from "./semver";
@@ -194,6 +195,9 @@ export function kitNames(): string[] {
   return getDb().select({ name: kits.name }).from(kits).orderBy(asc(kits.name)).all().map((k) => k.name);
 }
 
-export function latestVersionId(kitId: number): number | undefined {
-  return getDb().select({ id: kitVersions.id }).from(kitVersions).where(eq(kitVersions.kitId, kitId)).orderBy(desc(kitVersions.id)).get()?.id;
+/** M1: metrics for every version of a kit, newest version first. */
+export function kitMetrics(name: string): VersionMetrics[] {
+  const kit = requireKit(name);
+  const runs = listRuns(name).map((r) => ({ version: r.version, outcome: r.outcome, correctionCount: r.correctionCount }));
+  return aggregateMetrics(kit.versions.map((v) => v.semver), runs);
 }

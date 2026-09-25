@@ -35,9 +35,10 @@ export function InboxList({ tab, kit, kitNames, items }: Props) {
 
   const setStatus = useCallback(
     async (id: number, status: "accepted" | "dismissed" | "new") => {
+      // Remove the item only once the change is saved, so what the list shows is always persisted.
+      if (!(await patch(id, { status }))) return;
       setHidden((h) => new Set(h).add(id));
       setSelected((s) => s.filter((x) => x !== id));
-      await patch(id, { status });
       router.refresh();
     },
     [router],
@@ -61,9 +62,10 @@ export function InboxList({ tab, kit, kitNames, items }: Props) {
 
   async function merge() {
     const ids = [...selected].sort((a, b) => a - b);
+    const res = await fetch("/api/feedback/merge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids }) });
+    if (!res.ok) return;
     setHidden((h) => new Set([...h, ...ids.slice(1)]));
     setSelected([]);
-    await fetch("/api/feedback/merge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids }) });
     router.refresh();
   }
 
