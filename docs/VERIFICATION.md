@@ -138,3 +138,61 @@ MCP walkthrough (`playwright-headless` + CLI with a temp HOME, mock server on `.
 - E2E-30: pass. debug-kit runs show `3 passed, 1 failed` (and `2 passed, 1 failed` for the dup run); the new-feature-kit run shows `—`.
 
 Fixes from the walkthrough: the compare-page selects, diff selects and edit dialog controls had no accessible names in the accessibility snapshot; `aria-label`s were added.
+
+## Final acceptance (2026-09-25)
+
+1. `npm run build`: succeeded (all routes dynamic). The client bundle (`.next/static`) contains no `ANTHROPIC_API_KEY`, `sk-ant` or `@anthropic-ai` code. `KITFORGE_LLM_MODE=mock KITFORGE_DB_PATH=.data/final.db npm start`: `/api/health` → 200 `{"ok":true,"llmMode":"mock"}`.
+2. `BASE_URL=http://127.0.0.1:4317 npx playwright test` against that production server: **31 passed, 0 failed, 0 flaky** (4 @smoke specs excluded).
+3. MCP walkthrough (`playwright-headless`) against the production server, CLI steps from a temp HOME:
+   - Stage 0–1: E2E-00, 01, 02, 03, 04, 05: pass (the nested-zip half of E2E-02 was walked on dev and passed as a spec against production).
+   - Stage 2–3 (CLI): E2E-06, 07, 08, 09, 10, 11, 12 (queued in 813 ms, then flushed), 13: pass.
+   - Stage 4: E2E-14, 15, 16, 17: pass. Note: `kit note` attaches to the most recent run, which in this combined walk was the new-feature-kit run, so the note appeared under that filter. That is correct behaviour.
+   - Stage 5: **E2E-19 walked in full, every step through the UI (import, inbox accept, Improve with the loading state, per-hunk accept, publish) plus CLI pull/list/report: pass.** E2E-18 (observed inside E2E-19), E2E-20, E2E-21, E2E-22: pass.
+4. Real-API smoke: **not run.** `ANTHROPIC_API_KEY` and `KITFORGE_MODEL` are empty in `.env` and unset in the shell. `RUN_SMOKE=1 KITFORGE_LLM_MODE=real npx playwright test --grep @smoke` → 4 skipped (verified to skip cleanly). The Playwright config now loads `.env` so a key saved there is picked up.
+5. Extra checks:
+   - Latency NFR: with 51 kits, 2,001 runs and 4,002 feedback rows seeded into the production DB, median server response times were `/` 20 ms, `/kits/<name>` 8 ms, runs tab 13 ms, metrics tab 9 ms, `/inbox` (about 2,000 untriaged items) 173 ms. All are under the 500 ms target.
+   - `node bin/kit.mjs --help` works from outside the repo (the entry `npm link` uses).
+   - `KITFORGE_LLM_MODE=real` without a key or model fails at startup with "Invalid KitForge environment: ANTHROPIC_API_KEY: required …; KITFORGE_MODEL: required …".
+
+### Totals
+
+| Suite | Result |
+|---|---|
+| Vitest (`npm test`) | 34 passed / 0 failed |
+| Playwright non-smoke, dev server (`npm run test:e2e`) | 31 passed / 0 failed |
+| Playwright non-smoke, production server (`BASE_URL=…`) | 31 passed / 0 failed |
+| Playwright @smoke | 4 skipped (no API key or model configured) |
+| MCP walkthrough | E2E-00 … E2E-30 all walked at their stage; every P0 scenario plus E2E-19 re-walked against the production build; all pass |
+
+### Skipped
+
+- SMOKE-1…4: need `ANTHROPIC_API_KEY` + `KITFORGE_MODEL` (and `KITFORGE_SMOKE_TRANSCRIPT` for SMOKE-4). So `src/lib/llm/anthropic.ts` has been typechecked but never called against the real API.
+
+### Known issues
+
+- **The real Claude path is unverified** until the smoke suite runs (see above). Current Claude models reject forced `tool_choice`, so the client uses `auto` with a single tool and a "call this tool" instruction (DECISIONS #5). If a model ever answers without the tool, the run is queued (`extraction_failed`) or the proposal shows the error. Nothing is written.
+- **Cost target:** the PRD targets under $0.05 per extraction. The trimmed-transcript cap (600k chars, about 150k tokens) can exceed that on large sessions with an Opus-class model; typical sessions are much smaller.
+- **Real Claude Code transcript format** has not been checked against the fixture format (SMOKE-4). Detection accepts both `/` and `\` paths.
+- **Kit files are stored as UTF-8 text.** A binary file inside a kit (an image, for example) would be corrupted on import. Kits are Markdown, so this is recorded rather than handled.
+- **Saves around navigation:** triage, tag and outcome changes use `keepalive` so they survive leaving the page. A reload fired within about 300 ms of a change can still show the previous value for one render.
+- **`npm audit`:** 2 advisories in the PostCSS copy bundled with Next 15 (build-time CSS processing). The fix requires Next 16, which the fixed stack (Next 15) rules out; the app runs on localhost only.
+- **`kit report` from a real Claude Code SessionEnd hook on Windows** is exercised only through the harness (the same stdin payload), not from a live Claude Code session.
+
+### Run KitForge yourself (Windows, Git Bash or PowerShell, from the repo root)
+
+1. Install: `npm install`
+2. Configure `.env` for real use. **Mock mode is for tests only**: it fakes extraction and exposes `/api/test/reset`, which deletes every row.
+   ```
+   KITFORGE_LLM_MODE=real
+   ANTHROPIC_API_KEY=sk-ant-...
+   KITFORGE_MODEL=claude-opus-5
+   ```
+   (Any current model id works; a smaller model lowers the per-run cost.) The DB stays at `~/.kitforge/kitforge.db`.
+3. Start the app: `npm run build` then `npm start` (or `npm run dev`). Open http://127.0.0.1:4317.
+4. Put the CLI on your PATH: `npm link`, then check with `kit --help`.
+5. Install the Claude Code hook: `kit hook install` (adds `SessionEnd → kit report` to `~/.claude/settings.json`, keeping your other settings).
+6. Import your three kits. Back up `~/.claude/skills` first, because `kit pull` replaces each kit folder with the stored copy:
+   - In the UI: Import kit → paste the absolute folder path (for example `C:\Users\you\.claude\skills\debug-kit`) → Import. Repeat for each kit.
+   - Or from a shell: `curl -F "path=C:\Users\you\.claude\skills\debug-kit" http://127.0.0.1:4317/api/kits/import`
+   - Then run `kit pull <name>` once per kit so each folder gets its `.kitforge.json` manifest. **Runs are only reported for kits that have that manifest.** Check with `kit list`.
+7. Optional, with the key set: `RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep @smoke`, and `KITFORGE_SMOKE_TRANSCRIPT=<a real ~/.claude/projects/…/*.jsonl that read a kit> RUN_SMOKE=1 KITFORGE_LLM_MODE=real npm run test:e2e -- --grep SMOKE-4`.

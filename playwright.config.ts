@@ -1,4 +1,9 @@
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
+
+// Make ANTHROPIC_API_KEY / KITFORGE_MODEL from .env visible to the smoke suite. Values already in the
+// shell win, and the mock web server below always gets its own explicit settings.
+if (existsSync(".env")) process.loadEnvFile(".env");
 
 const baseURL = process.env.BASE_URL ?? "http://127.0.0.1:4317";
 const smoke = process.env.RUN_SMOKE === "1";
