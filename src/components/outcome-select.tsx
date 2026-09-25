@@ -15,6 +15,8 @@ export function OutcomeSelect({ runId, outcome }: { runId: number; outcome: stri
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ outcome: e.target.value }),
+          // Finish the save even if the user navigates away straight after choosing.
+          keepalive: true,
         });
         router.refresh();
       }}

@@ -70,3 +70,22 @@ Walkthrough (CLI in Git Bash with a fresh temp `HOME`/`USERPROFILE`; UI through 
 - E2E-13: pass. The `MOCK:extract-fail` transcript as sess-010 printed `Queued 1 report(s)`; no sess-010 run or feedback was written (the server returned 502 `extraction_failed`), and the report waits in the outbox.
 
 Surprises: none in the app. My first walkthrough helper mangled Windows paths in the stdin JSON (a shell quoting bug); rerunning with `cygpath -m` fixed it.
+
+## Stage 4 — Inbox (2026-09-25)
+
+Commands:
+
+- `npm run typecheck`: clean. `npx eslint src e2e`: clean. `npm test`: 23 passed.
+- `npx playwright test --grep "@stage[0-4]"`: first run 17 passed, 1 failed (E2E-15). After the fix below: 18 passed, 0 failed (run twice).
+
+Walkthrough (MCP `playwright-headless` + CLI with a temp HOME, mock server on `.data/mcp.db`):
+
+- E2E-14: pass. After report partial, `inbox-count` = 2 and New lists #1 and #2 with kit `debug-kit` and the X1 quotes. Accept #1 and dismiss #2 leave "Nothing to triage" and the badge disappears. After a reload, Accepted shows only #1 and the kit page shows `1 accepted`.
+- E2E-15: pass. With debug-kit and new-feature-kit reported, filtering to `new-feature-kit` shows only "Edited the module without reading it first" (URL `?tab=new&kit=new-feature-kit`). Tag `testing` typed + Enter on #1 is still there after a reload.
+- E2E-16: pass. `kit note "Good root-cause analysis" --rating 4` printed `Added note to run #1` and the inbox gained a `note` item rated 4. After overriding the outcome to `success` and reloading, the run shows `success` and the library card shows `100%`. On an empty DB, `kit note x` prints `No runs yet` (exit 1).
+- E2E-17: pass. `j` focused the first item (#2, `data-focused="true"`); `a` accepted it; `j`,`d` dismissed the other; New shows "Nothing to triage" (API: #2 accepted, #1 dismissed).
+
+Bugs found and fixed:
+
+1. **E2E-15 (spec):** the tag chip was shown before the PATCH finished, so an immediate reload could lose the tag. The chip is now added only after the save succeeds.
+2. **E2E-16 (MCP walkthrough only; the spec passed):** changing `run-outcome-select` and navigating away within about 300 ms aborted the PATCH, so the override was lost. Triage and outcome mutations now use `fetch(..., { keepalive: true })`, so the save completes even when the page unloads. Re-checked: the value persists; the next render can show the old value if it lands before the save commits, and it is correct on the following render.
