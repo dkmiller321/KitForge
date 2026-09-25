@@ -108,7 +108,9 @@ export async function recordRun(input: RunReportInput): Promise<{ created: boole
   let extraction;
   try {
     extraction = await getLlm().extractRun(input.transcript);
-  } catch {
+  } catch (err) {
+    // Log the cause (never request content or keys) so a failed LLM call can be diagnosed.
+    console.error(`[kitforge] extraction failed: ${err instanceof Error ? err.message : String(err)}`);
     throw new RunError("extraction_failed", 502);
   }
   return storeRun(target, input, extraction);

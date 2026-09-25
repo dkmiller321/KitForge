@@ -54,7 +54,9 @@ export async function createProposal(kitName: string, opts: { instruction?: stri
   let proposal;
   try {
     proposal = await getLlm().proposeImprovement({ files, themes: latest.themes, instruction });
-  } catch {
+  } catch (err) {
+    // Log the cause (never request content or keys) so a failed LLM call can be diagnosed.
+    console.error(`[kitforge] proposal failed: ${err instanceof Error ? err.message : String(err)}`);
     throw new ProposalError("proposal_failed", 502);
   }
 

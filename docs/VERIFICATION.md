@@ -239,3 +239,10 @@ MCP walkthrough (`playwright-headless`, production build, mock mode, scratch DB)
 - Feedback page: "Feedback" in the nav with badge 4; tabs Open / Resolved / Dismissed; each item has Dismiss only, with no Accept.
 
 Not verified: the real OpenRouter path. `OPENROUTER_API_KEY` is set in `.env`, but `KITFORGE_MODEL` is empty and the mode is `mock`, so the smoke suite skips. OpenRouter's public model list confirms that `inclusionai/ling-3.0-flash-vl` (the model named in the user's `DEFAULT_MODEL`) supports `tools`, `tool_choice` and structured outputs.
+
+## Stage 8 addendum — first real analysis via OpenRouter (2026-09-25)
+
+- `.env`: `KITFORGE_LLM_MODE=real`, `KITFORGE_MODEL=inclusionai/ling-3.0-flash-vl` (a trailing `+` typo removed), `OPENROUTER_API_KEY` set. `/api/health` → `{"ok":true,"llmMode":"real"}`; `/api/test/reset` → 404, as required in real mode.
+- The first two in-app attempts returned 502 `analysis_failed`. After adding server-side logging, the cause was malformed tool-call JSON from the model (DECISIONS #33). A standalone reproduction of the same request succeeded in 65 s with schema-valid output.
+- Fix: retry malformed output up to 3 attempts. Unit tests: 52 passed (4 new: retry then succeed, give up after 3, no retry on HTTP errors, a truncated response counts as malformed). `npx playwright test`: 34 passed.
+- **Real result** (production build, real DB): `POST /api/kits/idea-to-build-kit/insights` → 201 in 84 s. The 41 Canvas-Chat build-log items became 12 ranked themes (6 high, 5 medium, 1 low), every one of the 41 items cited by a theme, `stale: false`. Top themes: kickoff environment verification (#1 #2 #6 #8), container-only failures found too late (#23–25), narrow dependency list and unpinned versions (#3 #4), assertions that pass while real bugs persist (#12 #16 #21 #31 #34 #36), visual defects invisible to specs (#27 #28 #37 #39), diagram layout (#40 #41). MCP screenshot of the Insights tab reviewed.

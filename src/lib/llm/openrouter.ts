@@ -58,6 +58,7 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 interface ChatResponse {
   choices?: {
+    finish_reason?: string | null;
     message?: {
       content?: string | null;
       tool_calls?: { function?: { name?: string; arguments?: string } }[];
@@ -71,7 +72,9 @@ interface ChatResponse {
  * text (optionally fenced) for models that answer in text instead of calling the tool.
  */
 export function parseToolOutput(response: ChatResponse, toolName: string): unknown {
-  const message = response.choices?.[0]?.message;
+  const choice = response.choices?.[0];
+  const message = choice?.message;
+  if (choice?.finish_reason === "length") throw new SyntaxError(`${toolName} output was cut off at the token limit`);
   const call = message?.tool_calls?.find((c) => c.function?.name === toolName) ?? message?.tool_calls?.[0];
   if (call?.function?.arguments) return JSON.parse(call.function.arguments);
   const text = message?.content?.trim();
@@ -80,7 +83,7 @@ export function parseToolOutput(response: ChatResponse, toolName: string): unkno
     const candidate = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
     if (candidate) return JSON.parse(candidate);
   }
-  throw new Error(`Model returned no ${toolName} output`);
+  throw new SyntaxError(`Model returned no ${toolName} output`);
 }
 
 async function callTool(tool: ToolSpec, system: string, content: string): Promise<unknown> {

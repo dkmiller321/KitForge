@@ -57,7 +57,9 @@ export async function analyzeKit(kitName: string): Promise<InsightsDto> {
         resolvedInVersion: f.resolvedInVersion,
       })),
     });
-  } catch {
+  } catch (err) {
+    // Log the cause (never request content or keys) so a failed LLM call can be diagnosed.
+    console.error(`[kitforge] analysis failed: ${err instanceof Error ? err.message : String(err)}`);
     throw new InsightsError("analysis_failed", 502);
   }
 

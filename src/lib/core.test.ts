@@ -9,6 +9,7 @@ import { KitImportError, kitFromEntries } from "./kits/parse";
 import { REPORT_END, REPORT_START, withReportingStep } from "./kits/reporting";
 import { bumpSemver, compareSemver, nextVersion } from "./kits/semver";
 import { mockExtraction, mockInsights, mockProposal } from "./llm/mock";
+import { MalformedOutputError, validated } from "./llm";
 import { parseToolOutput } from "./llm/openrouter";
 import { extractionSchema, insightsSchema, proposalSchema, type Theme } from "./llm/schemas";
 import { aggregateMetrics, formatCorrections, formatPercent } from "./metrics";
@@ -299,5 +300,36 @@ describe("parseToolOutput (OpenRouter responses)", () => {
   it("throws when there is nothing to parse", () => {
     expect(() => parseToolOutput({ choices: [{ message: { content: "" } }] }, "x")).toThrow();
     expect(() => parseToolOutput({}, "x")).toThrow();
+  });
+});
+
+describe("validated LLM calls", () => {
+  const good = { outcome: "success", corrections: [], tests: null };
+  const stub = (answers: (() => unknown)[]) => {
+    let calls = 0;
+    const next = async () => answers[Math.min(calls++, answers.length - 1)]();
+    return { calls: () => calls, raw: { extractRun: next, analyzeFeedback: next, proposeImprovement: next } };
+  };
+
+  it("retries malformed output, then succeeds", async () => {
+    const s = stub([() => JSON.parse("[1,"), () => ({ outcome: "great" }), () => good]);
+    await expect(validated(s.raw).extractRun("t")).resolves.toEqual(good);
+    expect(s.calls()).toBe(3);
+  });
+
+  it("gives up after three malformed answers", async () => {
+    const s = stub([() => ({ nope: true })]);
+    await expect(validated(s.raw).extractRun("t")).rejects.toBeInstanceOf(MalformedOutputError);
+    expect(s.calls()).toBe(3);
+  });
+
+  it("does not retry network or HTTP errors", async () => {
+    const s = stub([() => { throw new Error("OpenRouter 401: bad key"); }]);
+    await expect(validated(s.raw).extractRun("t")).rejects.toThrow("OpenRouter 401");
+    expect(s.calls()).toBe(1);
+  });
+
+  it("treats a response cut off at the token limit as malformed", () => {
+    expect(() => parseToolOutput({ choices: [{ finish_reason: "length", message: { content: '{"themes": [' } }] }, "x")).toThrow(SyntaxError);
   });
 });
