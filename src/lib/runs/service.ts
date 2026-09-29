@@ -68,8 +68,10 @@ interface RunMeta {
   endedAt: string;
 }
 
+type RunResult = Omit<Extraction, "corrections"> & { corrections: { text: string; quote: string | null }[] };
+
 /** Writes a run and its corrections in one transaction. Idempotent on (session, kit). */
-function storeRun(target: { kitId: number; versionId: number }, meta: RunMeta, result: Extraction): { created: boolean; runId: number } {
+function storeRun(target: { kitId: number; versionId: number }, meta: RunMeta, result: RunResult): { created: boolean; runId: number } {
   const db = getDb();
   return db.transaction(() => {
     const existing = findRun(meta.sessionId, target.kitId);
@@ -116,7 +118,7 @@ export async function recordRun(input: RunReportInput): Promise<{ created: boole
   return storeRun(target, input, extraction);
 }
 
-export interface SelfReportInput extends Extraction {
+export interface SelfReportInput extends RunResult {
   sessionId?: string;
   kit: string;
   version: string;

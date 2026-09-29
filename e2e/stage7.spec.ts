@@ -56,6 +56,14 @@ test("E2E-31 @stage7 self-report from the kit's final step (L7, R1, R2)", async 
   await expect(page.getByTestId("run-tests")).toHaveText("5 passed, 1 failed");
   await page.getByTestId("nav-inbox").click();
   await expect(page.getByTestId("inbox-item")).toHaveCount(2);
+
+  // Builder-observed issues have no user quote: the quote is optional.
+  const noQuote = await request.post("/api/runs/report", {
+    data: { ...REPORT, session_id: "claude-002", corrections: [{ text: "[env] Port 5432 was already taken" }] },
+  });
+  expect(noQuote.status()).toBe(201);
+  const stored = (await feedbackList(request, "?kit=debug-kit")).find((f) => f.text === "[env] Port 5432 was already taken");
+  expect(stored?.quote).toBeNull();
 });
 
 test("E2E-32 @stage7 kits carry the reporting step, and it works as written (L1, L7)", async ({ page, request }) => {

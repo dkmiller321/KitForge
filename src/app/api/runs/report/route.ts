@@ -6,7 +6,8 @@ import { RunError, recordSelfReport } from "@/lib/runs/service";
 
 export const dynamic = "force-dynamic";
 
-// Quotes are clipped rather than rejected: a slightly long quote must not lose the whole report.
+// Quotes are optional (builder-observed issues have none) and clipped rather than rejected:
+// a slightly long quote must not lose the whole report.
 const quote = z
   .string()
   .trim()
@@ -19,7 +20,10 @@ const body = z.object({
   version: z.string().min(1),
   project_path: z.string().max(4096).default(""),
   outcome: z.enum(["success", "partial", "failed"]),
-  corrections: z.array(z.object({ text: z.string().trim().min(1).max(1000), quote })).max(50).default([]),
+  corrections: z
+    .array(z.object({ text: z.string().trim().min(1).max(2000), quote: z.union([quote, z.literal("")]).nullish().transform((q) => q || null) }))
+    .max(100)
+    .default([]),
   tests: z.object({ passed: z.number().int().min(0), failed: z.number().int().min(0) }).nullable().default(null),
 });
 
